@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>VoiceDesk</title>
+<style>
+  :root{
+    --bg:#232323; --panel:#2d2d2d; --border:#3f3f3f; --text:#e8e8e8;
+    --muted:#9b9b9b; --accent:#4a90d9; --green:#4cc38a; --red:#e5534b; --yellow:#e8b34b;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"Yu Gothic UI","Hiragino Sans","Meiryo",sans-serif;
+    font-size:12px; padding:10px;
+  }
+  h1{font-size:13px; margin-bottom:10px; display:flex; align-items:center; gap:6px;}
+  h1 span{color:var(--accent);}
+  .sec{
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    padding:10px; margin-bottom:8px;
+  }
+  details.sec summary{cursor:pointer; font-weight:700; font-size:12px; outline:none;}
+  details.sec[open] summary{margin-bottom:8px;}
+  label.fld{display:block; color:var(--muted); font-size:11px; margin:6px 0 3px;}
+  .subhead{color:var(--text); font-size:11px; font-weight:700; margin:12px 0 2px; border-top:1px solid var(--border); padding-top:10px;}
+  input[type=text], textarea, select{
+    width:100%; background:#1d1d1d; border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:6px 8px; font-size:12px; font-family:inherit;
+  }
+  input:focus, textarea:focus, select:focus{outline:none; border-color:var(--accent);}
+  .row{display:flex; gap:6px; align-items:center;}
+  .row > *{flex:1;}
+  .row > .fit{flex:0 0 auto;}
+  button{
+    background:#3a3a3a; border:1px solid var(--border); color:var(--text);
+    padding:7px 10px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;
+  }
+  button:hover{filter:brightness(1.2);}
+  button:disabled{opacity:.45; cursor:default; filter:none;}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+  button.stop{color:var(--red);}
+  .btns{display:flex; gap:6px; margin-top:8px;}
+  .btns button{flex:1;}
+  #status{
+    margin-top:8px; padding:8px; background:#1d1d1d; border:1px solid var(--border);
+    border-radius:6px; min-height:34px; font-size:11px; color:var(--muted);
+    white-space:pre-wrap; word-break:break-all;
+  }
+  #status.ok{color:var(--green);} #status.err{color:var(--red);} #status.run{color:var(--yellow);}
+  #history{margin-top:6px; font-size:11px; color:var(--muted); max-height:100px; overflow:auto;}
+  #history div{padding:2px 0; border-bottom:1px solid var(--border); word-break:break-all;}
+  .chk{display:flex; align-items:center; gap:6px; color:var(--muted); margin-top:6px; cursor:pointer;}
+  .chk input{width:auto;}
+  .hint{color:var(--muted); font-size:11px; line-height:1.5; margin-top:6px;}
+  input.num{width:40px; flex:0 0 auto; text-align:center; padding:6px 2px;}
+  .tracklabel{color:var(--muted); font-size:11px; flex:0 0 auto;}
+  /* 掛け合い行 */
+  .vrow{display:flex; gap:4px; align-items:center; margin-bottom:5px;}
+  .vrow select.rvoice{width:112px; flex:0 0 auto; padding:6px 2px;}
+  .vrow input.rtext{flex:1; min-width:60px;}
+  .vrow button{padding:6px 7px; flex:0 0 auto;}
+  .vrow button.rdel{color:var(--muted);}
+  .engbox{border:1px solid var(--border); border-radius:6px; padding:6px; margin-bottom:6px;}
+  .engbox .row{margin-bottom:4px;}
+  .engbox input.ename{width:110px; flex:0 0 auto;}
+</style>
+</head>
+<body>
+  <h1><span>&#9835;</span> VoiceDesk</h1>
+
+  <details class="sec" id="settingsSec">
+    <summary>設定</summary>
+
+    <div class="subhead" style="border-top:none; padding-top:0;">共通</div>
+    <label class="fld">WAV出力フォルダ</label>
+    <div class="row">
+      <input type="text" id="outDir" placeholder="例: D:\素材\ボイス">
+      <button class="fit" id="btnBrowseOutDir">参照</button>
+    </div>
+    <label class="fld">txtファイルの文字コード</label>
+    <select id="txtEnc">
+      <option value="sjis">Shift-JIS(標準)</option>
+      <option value="utf8">UTF-8</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="makeTxt" checked>保存時にtxt(字幕用)も作る</label>
+    <label class="chk"><input type="checkbox" id="namePrefix">ファイル名の先頭にキャラ名を付ける</label>
+    <label class="chk"><input type="checkbox" id="insAudio">保存時に音声をシーケンスへ配置(再生ヘッド位置・声ごとのトラック)</label>
+
+    <div class="subhead">AquesTalk</div>
+    <label class="fld">AquesTalkPlayer.exe のパス</label>
+    <div class="row">
+      <input type="text" id="exePath" placeholder="例: C:\\...\\aquestalkplayer\\AquesTalkPlayer.exe">
+      <button class="fit" id="btnBrowseExe">参照</button>
+    </div>
+
+    <div class="subhead">VOICEVOX / 互換エンジン(AivisSpeech・SHAREVOX等)</div>
+    <div id="engines"></div>
+    <div class="row">
+      <button id="btnAddEngine">＋ エンジンを追加</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="vvAutoLaunch" checked>未起動なら自動起動する(実行ファイル設定時)</label>
+    <div class="hint">互換エンジンはURLのポート番号が異なります(VOICEVOX: 50021 / AivisSpeech: 10101 / SHAREVOX: 50025)。実行ファイルは自動起動に使います(空欄可)。</div>
+
+    <div class="subhead">A.I.VOICE2</div>
+    <label class="fld">aivoice.exe のパス</label>
+    <div class="row">
+      <input type="text" id="avExePath" placeholder="例: C:\\Program Files\\AI\\AIVoice2\\AIVoice2Editor\\aivoice.exe">
+      <button class="fit" id="btnBrowseAvExe">参照</button>
+    </div>
+    <label class="fld">A.I.VOICE2の書き出し先フォルダ(保存・配置に使用)</label>
+    <div class="row">
+      <input type="text" id="avOutDir" placeholder="A.I.VOICE2側で設定している書き出し先">
+      <button class="fit" id="btnBrowseAvOutDir">参照</button>
+    </div>
+
+    <div class="hint">設定は自動保存されます。</div>
+  </details>
+
+  <div class="sec">
+    <div class="row" style="margin-bottom:6px;">
+      <span style="font-weight:700;">掛け合いエディタ</span>
+      <button class="fit" id="btnReloadVoices" title="声リストを再読込">&#8635;</button>
+    </div>
+    <div id="rows"></div>
+    <div class="btns">
+      <button id="btnAddRow">＋ 行を追加</button>
+      <button class="stop fit" id="btnStopAll">&#9632; 停止</button>
+    </div>
+    <div class="btns">
+      <button class="primary" id="btnSaveAll">全行を保存</button>
+    </div>
+    <div class="hint">行の「A」は配置先オーディオトラック(声ごとに記憶)。複数行のテキストを貼り付けると自動で行に分かれます。</div>
+  </div>
+
+  <details class="sec" id="toolsSec">
+    <summary>ツール</summary>
+    <button id="btnMakeCaptions" style="width:100%">選択した音声クリップから字幕をまとめて生成</button>
+    <div class="hint">タイムラインで音声クリップを選択(未選択ならターゲット中のオーディオトラック全体が対象)して実行。各クリップと同名のtxtを読み、実際の位置・長さに合わせた字幕を1本のキャプショントラックとして挿入します。</div>
+  </details>
+
+  <div id="status">準備OK。行にセリフを入力して保存してください。</div>
+  <div id="history"></div>
+
+<script>
+"use strict";
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const cp = require('child_process');
+const http = require('http');
+
+const $ = id => document.getElementById(id);
+const SETTING_KEY = 'voicedesk_settings_v2';
+const PS_EXE = (process.env.SystemRoot || 'C:\\Windows') + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const AV_VOICE = 'av';
+
+const ERR_TABLE = {
+  2000:'予期せぬエラー', 2001:'システム辞書(aqdic.bin)が不正', 2002:'ユーザ辞書(aq_user.dic)が不正',
+  2003:'AqKanji2Koe初期化エラー', 2004:'音声記号列が指定されていない', 2005:'DLLのロード失敗',
+  2006:'不正なDLL', 2007:'PHONTファイルの読み込み失敗', 2008:'音声記号列に未定義の読み記号',
+  2009:'音声記号列のタグ指定が不正', 2010:'発話文が長すぎる', 2011:'Phontファイルが不正',
+  2012:'音声記号列が正しくない', 2013:'メモリ不足', 2014:'テキストが空文',
+  2015:'AqKanji2Koe変換エラー', 2016:'WAVファイルの書き込み不可', 2017:'プリセットファイル破損',
+  2018:'プリセットファイルが開けない', 2019:'プリセット名の指定が不正', 2020:'プリセットファイル書込失敗',
+  2021:'指定のプリセット名が見つからない', 2022:'指定のテキストファイルが開けない'
+};
+function errMsg(code){ return ERR_TABLE[code] || ('エラーコード ' + code); }
+
+const JSX_ERR = {
+  'NO_SEQUENCE': 'アクティブなシーケンスがありません',
+  'NO_CLIPS': '対象の音声クリップがありません(クリップを選択するか、オーディオトラックをターゲットにしてください)',
+  'IMPORT_WAV': 'WAVのプロジェクト読み込みに失敗しました',
+  'IMPORT_SRT': '字幕(SRT)のプロジェクト読み込みに失敗しました',
+  'TRACK_LOCKED': '対象のオーディオトラックがロックされています',
+  'NO_CAPTION_API': 'このPremiereバージョンは字幕挿入APIに未対応です'
+};
+function jsxErrMsg(raw){
+  const key = String(raw).replace(/^ERR:/, '');
+  return JSX_ERR[key] || key;
+}
+
+// ================= 設定 =================
+let trackMap = {};      // voiceId -> track番号
+let engines = [];       // [{name, url, exe}] VOICEVOX互換エンジン
+let vvSpeakerCache = {}; // engineName -> [{id, label}]
+let rowsData = [];      // [{voice, text}]
+
+function loadSettings(){
+  let s = {};
+  try{ s = JSON.parse(localStorage.getItem(SETTING_KEY)) || {}; }catch(e){}
+  $('exePath').value    = s.exePath    || '';
+  $('avExePath').value  = s.avExePath  || '';
+  $('outDir').value     = s.outDir     || '';
+  $('avOutDir').value   = s.avOutDir   || '';
+  $('vvAutoLaunch').checked = s.vvAutoLaunch !== false;
+  engines = s.engines || [];
+  if(engines.length === 0){
+    engines = [{name:'VOICEVOX', url:(s.vvUrl || 'http://127.0.0.1:50021'), exe:(s.vvExePath || '')}];
+  }
+  $('txtEnc').value     = s.txtEnc     || 'sjis';
+  $('makeTxt').checked  = s.makeTxt !== false;
+  $('namePrefix').checked = !!s.namePrefix;
+  $('insAudio').checked = !!s.insAudio;
+  trackMap = s.trackMap || {};
+  vvSpeakerCache = (s.vvSpeakerCache && !Array.isArray(s.vvSpeakerCache)) ? s.vvSpeakerCache : {};
+  rowsData = (s.rowsData && s.rowsData.length) ? s.rowsData : [{voice:'', text:''}];
+  if(!s.exePath && !s.avExePath && !(s.engines && s.engines.some(e=>e.exe))){
+    $('settingsSec').open = true;
+    setTimeout(()=>setStatus('初回設定: 設定欄で使用する音声合成ソフトのパスと出力フォルダを設定してください(使うものだけでOK)'), 0);
+  }
+}
+function saveSettings(){
+  const s = {
+    exePath:   $('exePath').value.trim(),
+    avExePath: $('avExePath').value.trim(),
+    outDir:    $('outDir').value.trim(),
+    avOutDir:  $('avOutDir').value.trim(),
+    engines:   engines,
+    vvAutoLaunch: $('vvAutoLaunch').checked,
+    txtEnc:    $('txtEnc').value,
+    makeTxt:   $('makeTxt').checked,
+    namePrefix:$('namePrefix').checked,
+    insAudio:  $('insAudio').checked,
+    trackMap:  trackMap,
+    vvSpeakerCache: vvSpeakerCache,
+    rowsData:  rowsData
+  };
+  localStorage.setItem(SETTING_KEY, JSON.stringify(s));
+}
+['exePath','avExePath','outDir','avOutDir','vvAutoLaunch','txtEnc','makeTxt','namePrefix','insAudio'].forEach(id=>{
+  $(id).addEventListener('change', ()=>{
+    saveSettings();
+    if(id==='exePath') reloadVoices();
+  });
+});
+
+// ================= 参照ダイアログ =================
+function browse(inputId, chooseDir, exts){
+  try{
+    const res = window.cep.fs.showOpenDialogEx(false, chooseDir, chooseDir ? 'フォルダを選択' : 'ファイルを選択', null, exts || null);
+    if(res && res.data && res.data[0]){
+      $(inputId).value = String(res.data[0]).replace(/\//g, '\\');
+      saveSettings();
+      if(inputId === 'exePath') reloadVoices();
+    }
+  }catch(e){
+    setStatus('ダイアログを開けませんでした: ' + e.message, 'err');
+  }
+}
+$('btnBrowseExe').addEventListener('click',      ()=>browse('exePath',   false, ['exe']));
+$('btnBrowseAvExe').addEventListener('click',    ()=>browse('avExePath', false, ['exe']));
+$('btnBrowseOutDir').addEventListener('click',   ()=>browse('outDir',    true));
+$('btnBrowseAvOutDir').addEventListener('click', ()=>browse('avOutDir',  true));
+
+// ================= ステータス =================
+function setStatus(msg, cls){
+  const el = $('status');
+  el.textContent = msg;
+  el.className = cls || '';
+}
+function addHistory(name){
+  const h = $('history');
+  const div = document.createElement('div');
+  div.textContent = name;
+  h.insertBefore(div, h.firstChild);
+  while(h.children.length > 20) h.removeChild(h.lastChild);
+}
+
+// ================= エンジン管理UI =================
+function sanitizeEngineName(n){
+  n = String(n || '').replace(/[:\\|]/g, '').trim();
+  return n || 'ENGINE';
+}
+function renderEngines(){
+  const box = $('engines');
+  box.innerHTML = '';
+  engines.forEach((eng, idx)=>{
+    const wrap = document.createElement('div');
+    wrap.className = 'engbox';
+
+    const r1 = document.createElement('div');
+    r1.className = 'row';
+    const name = document.createElement('input');
+    name.type = 'text'; name.className = 'ename';
+    name.placeholder = '名前'; name.value = eng.name || '';
+    name.addEventListener('change', ()=>{ eng.name = sanitizeEngineName(name.value); name.value = eng.name; saveSettings(); buildVoiceList(); renderRows(); });
+    const url = document.createElement('input');
+    url.type = 'text'; url.placeholder = 'http://127.0.0.1:50021';
+    url.value = eng.url || '';
+    url.addEventListener('change', ()=>{ eng.url = url.value.trim(); saveSettings(); });
+    const del = document.createElement('button');
+    del.textContent = '×'; del.className = 'fit';
+    del.title = 'このエンジンを削除';
+    del.addEventListener('click', ()=>{ engines.splice(idx,1); saveSettings(); renderEngines(); buildVoiceList(); renderRows(); });
+    r1.appendChild(name); r1.appendChild(url); r1.appendChild(del);
+
+    const r2 = document.createElement('div');
+    r2.className = 'row';
+    const exe = document.createElement('input');
+    exe.type = 'text'; exe.placeholder = '実行ファイル(自動起動用・空欄可)';
+    exe.value = eng.exe || '';
+    exe.addEventListener('change', ()=>{ eng.exe = exe.value.trim(); saveSettings(); });
+    const br = document.createElement('button');
+    br.textContent = '参照'; br.className = 'fit';
+    br.addEventListener('click', ()=>{
+      try{
+        const res = window.cep.fs.showOpenDialogEx(false, false, 'ファイルを選択', null, ['exe']);
+        if(res && res.data && res.data[0]){
+          eng.exe = String(res.data[0]).replace(/\//g, '\\');
+          exe.value = eng.exe;
+          saveSettings();
+        }
+      }catch(e){}
+    });
+    r2.appendChild(exe); r2.appendChild(br);
+
+    wrap.appendChild(r1); wrap.appendChild(r2);
+    box.appendChild(wrap);
+  });
+}
+$('btnAddEngine').addEventListener('click', ()=>{
+  engines.push({name:'', url:'', exe:''});
+  saveSettings();
+  renderEngines();
+});
+
+// ================= 声リスト =================
+let voiceList = []; // [{id, label}]
+
+function aqPresetNames(){
+  const exe = $('exePath').value.trim();
+  if(!exe || !fs.existsSync(exe)) return [];
+  const presetFile = exe.replace(/\.exe$/i, '.preset');
+  const names = [];
+  try{
+    const buf = fs.readFileSync(presetFile);
+    const txt = new TextDecoder('shift_jis').decode(buf);
+    for(const line of txt.split(/\r?\n/).slice(1)){
+      const m = line.match(/^"([^"]+)"/);
+      if(m) names.push(m[1]);
+    }
+  }catch(e){}
+  return names;
+}
+
+function buildVoiceList(){
+  voiceList = [];
+  for(const n of aqPresetNames()){
+    voiceList.push({id: 'aq:' + n, label: '[AQ] ' + n});
+  }
+  for(const eng of engines){
+    const cache = vvSpeakerCache[eng.name] || [];
+    for(const sp of cache){
+      voiceList.push({id: 'vv:' + eng.name + ':' + sp.id, label: '[' + eng.name + '] ' + sp.label});
+    }
+  }
+  voiceList.push({id: AV_VOICE, label: '[A.I.VOICE2]'});
+}
+
+function voiceLabel(voiceId){
+  const v = voiceList.find(x=>x.id === voiceId);
+  if(v) return v.label.replace(/^\[..\]\s*|^\[A\.I\.VOICE2\]$/g, m=>m.indexOf('A.I.')>=0?'AIVOICE2':'');
+  return voiceId || '';
+}
+function voiceShortName(voiceId){
+  if(voiceId === AV_VOICE) return 'AIVOICE2';
+  const v = voiceList.find(x=>x.id === voiceId);
+  if(!v) return '';
+  return v.label.replace(/^\[..\]\s*/, '').replace(/[(（].*$/, '');
+}
+function trackFor(voiceId){
+  return trackMap[voiceId] || (voiceId === AV_VOICE ? '2' : '1');
+}
+
+async function reloadVoices(){
+  // 各エンジンの話者を取得(起動中のみ更新、失敗時はキャッシュ維持)
+  for(const eng of engines){
+    try{
+      if(await vvAlive(eng, 1500)){
+        const spk = JSON.parse((await vvRequest(eng, 'GET', '/speakers', null, 8000)).toString('utf8'));
+        const list = [];
+        for(const s of spk){
+          for(const st of (s.styles||[])){
+            list.push({id: st.id, label: s.name + '(' + st.name + ')'});
+          }
+        }
+        if(list.length) vvSpeakerCache[eng.name] = list;
+      }
+    }catch(e){}
+  }
+  saveSettings();
+  buildVoiceList();
+  renderRows();
+}
+$('btnReloadVoices').addEventListener('click', async ()=>{
+  setStatus('声リストを更新中...', 'run');
+  await reloadVoices();
+  const counts = engines.map(e=>e.name + ': ' + ((vvSpeakerCache[e.name]||[]).length)).join(' / ');
+  setStatus('声リストを更新しました(AquesTalk: ' + aqPresetNames().length + ' / ' + counts + ')', 'ok');
+});
+
+// ================= 掛け合い行UI =================
+function renderRows(){
+  const box = $('rows');
+  box.innerHTML = '';
+  rowsData.forEach((row, idx)=>{
+    const div = document.createElement('div');
+    div.className = 'vrow';
+
+    const sel = document.createElement('select');
+    sel.className = 'rvoice';
+    for(const v of voiceList){
+      const op = document.createElement('option');
+      op.value = v.id; op.textContent = v.label;
+      sel.appendChild(op);
+    }
+    if(!row.voice && voiceList.length) row.voice = voiceList[0].id;
+    sel.value = row.voice;
+    if(sel.value !== row.voice){ row.voice = sel.value; } // リストに無い場合の補正
+    sel.addEventListener('change', ()=>{ row.voice = sel.value; trk.value = trackFor(row.voice); saveSettings(); });
+
+    const trk = document.createElement('input');
+    trk.type = 'text'; trk.className = 'num';
+    trk.title = 'この声の配置先オーディオトラック';
+    trk.value = trackFor(row.voice);
+    trk.addEventListener('change', ()=>{
+      trackMap[row.voice] = trk.value.trim() || '1';
+      saveSettings();
+      document.querySelectorAll('.vrow').forEach((el,i)=>{
+        if(rowsData[i] && rowsData[i].voice === row.voice){
+          el.querySelector('input.num').value = trackMap[row.voice];
+        }
+      });
+    });
+
+    const txt = document.createElement('input');
+    txt.type = 'text'; txt.className = 'rtext';
+    txt.placeholder = 'セリフ';
+    txt.value = row.text || '';
+    txt.addEventListener('input', ()=>{ row.text = txt.value; });
+    txt.addEventListener('change', ()=>{ saveSettings(); });
+    txt.addEventListener('paste', (e)=>{
+      const t = (e.clipboardData || window.clipboardData).getData('text');
+      if(t && /\r?\n/.test(t.trim())){
+        e.preventDefault();
+        const lines = t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        if(lines.length === 0) return;
+        row.text = lines[0];
+        const newRows = lines.slice(1).map(l=>({voice: row.voice, text: l}));
+        rowsData.splice(idx+1, 0, ...newRows);
+        saveSettings();
+        renderRows();
+      }
+    });
+
+    const play = document.createElement('button');
+    play.textContent = '▶';
+    play.title = 'この行を再生';
+    play.addEventListener('click', ()=>playRow(row));
+
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.className = 'rdel';
+    del.title = '行を削除';
+    del.addEventListener('click', ()=>{
+      rowsData.splice(idx, 1);
+      if(rowsData.length === 0) rowsData.push({voice: row.voice, text: ''});
+      saveSettings();
+      renderRows();
+    });
+
+    div.appendChild(sel); div.appendChild(trk); div.appendChild(txt); div.appendChild(play); div.appendChild(del);
+    box.appendChild(div);
+  });
+}
+$('btnAddRow').addEventListener('click', ()=>{
+  const last = rowsData[rowsData.length-1];
+  rowsData.push({voice: last ? last.voice : (voiceList[0]||{}).id || '', text: ''});
+  saveSettings();
+  renderRows();
+  const inputs = document.querySelectorAll('.vrow input.rtext');
+  if(inputs.length) inputs[inputs.length-1].focus();
+});
+
+// ================= ファイル関連 =================
+function safeFileName(text){
+  let t = String(text).replace(/\r?\n/g, ' ');
+  t = t.replace(/[\\\/:*?"<>|]/g, '');
+  t = t.replace(/^#>/, '');
+  t = t.replace(/\s+/g, '_');
+  if(t.length > 50) t = t.slice(0, 50);
+  if(!t) t = 'output';
+  return t;
+}
+function uniqueWavPath(dir, base){
+  let p = path.join(dir, base + '.wav');
+  let i = 1;
+  while(fs.existsSync(p)){
+    p = path.join(dir, base + '_' + i + '.wav');
+    i++;
+  }
+  return p;
+}
+function wavBaseName(voiceId, text){
+  const base = safeFileName(text);
+  if($('namePrefix').checked){
+    const vn = safeFileName(voiceShortName(voiceId));
+    if(vn) return vn + '_' + base;
+  }
+  return base;
+}
+function wavDurationSec(p){
+  try{
+    const b = fs.readFileSync(p);
+    if(b.toString('ascii', 0, 4) !== 'RIFF') return 3;
+    let off = 12, byteRate = 0;
+    while(off + 8 <= b.length){
+      const id = b.toString('ascii', off, off + 4);
+      const sz = b.readUInt32LE(off + 4);
+      if(id === 'fmt ') byteRate = b.readUInt32LE(off + 16);
+      if(id === 'data' && byteRate) return sz / byteRate;
+      off += 8 + sz + (sz % 2);
+    }
+  }catch(e){}
+  return 3;
+}
+function secToSrt(t){
+  const ms = Math.max(0, Math.round(t * 1000));
+  const p = (n, w)=>String(n).padStart(w, '0');
+  return p(Math.floor(ms/3600000),2) + ':' + p(Math.floor(ms%3600000/60000),2) + ':' +
+         p(Math.floor(ms%60000/1000),2) + ',' + p(ms%1000,3);
+}
+function writeSrt(srtPath, entries){
+  let body = '';
+  entries.forEach((e, i)=>{
+    body += (i+1) + '\n' + secToSrt(e.start) + ' --> ' + secToSrt(e.end) + '\n' + e.text + '\n\n';
+  });
+  fs.writeFileSync(srtPath, '﻿' + body, 'utf8');
+}
+function writeTxt(txtPath, text){
+  const crlf = text.replace(/\r?\n/g, '\r\n');
+  if($('txtEnc').value === 'utf8'){
+    fs.writeFileSync(txtPath, crlf, 'utf8');
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve)=>{
+    const cmd = '[System.IO.File]::WriteAllBytes($env:AQV_PATH, [System.Text.Encoding]::GetEncoding(932).GetBytes($env:AQV_TEXT))';
+    const env = Object.assign({}, process.env, {AQV_PATH: txtPath, AQV_TEXT: crlf});
+    cp.execFile(PS_EXE,
+      ['-NoProfile','-ExecutionPolicy','Bypass','-Command', cmd],
+      {env: env, windowsHide:true},
+      (err)=>resolve(!err));
+  });
+}
+function readTxtAuto(txtPath){
+  try{
+    const buf = fs.readFileSync(txtPath);
+    let raw;
+    if(buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF){
+      raw = buf.toString('utf8', 3);
+    } else if($('txtEnc').value === 'utf8'){
+      raw = buf.toString('utf8');
+    } else {
+      raw = new TextDecoder('shift_jis').decode(buf);
+    }
+    return raw.replace(/\r\n/g, '\n').trim();
+  }catch(e){ return null; }
+}
+
+// ================= ExtendScript =================
+function evalJsx(fn, args){
+  return new Promise((resolve)=>{
+    const payload = (args||[]).map(a=>JSON.stringify(String(a))).join(',');
+    try{
+      window.__adobe_cep__.evalScript('$._AQV_.' + fn + '(' + payload + ')', resolve);
+    }catch(e){ resolve('ERR:' + e.message); }
+  });
+}
+async function placeAudio(wavPath, trackNum, offsetSec){
+  const r = await evalJsx('placeVoice', [wavPath, trackNum || '1', offsetSec || 0]);
+  if(String(r).indexOf('ERR:') === 0) return {ok:false, msg:'シーケンス配置エラー: ' + jsxErrMsg(r)};
+  return {ok:true, msg:'配置OK(A' + (trackNum||'1') + ')'};
+}
+
+// ================= AquesTalk =================
+let currentProc = null;
+let currentAudio = null;
+function runAques(args){
+  return new Promise((resolve)=>{
+    const exe = $('exePath').value.trim();
+    if(!exe || !fs.existsSync(exe)){ resolve({code:'noexe'}); return; }
+    const proc = cp.execFile(exe, args, {windowsHide:true}, (err)=>{
+      currentProc = null;
+      if(err && err.killed){ resolve({code:'killed'}); return; }
+      resolve({code: err ? err.code : 0});
+    });
+    currentProc = proc;
+  });
+}
+
+// ================= VOICEVOX =================
+function vvBase(eng){
+  let u = (eng && eng.url) ? eng.url.trim() : '';
+  if(!u) u = 'http://127.0.0.1:50021';
+  return u.replace(/\/+$/, '');
+}
+function vvRequest(eng, method, pathname, body, timeoutMs){
+  return new Promise((resolve, reject)=>{
+    let u;
+    try{ u = new URL(vvBase(eng) + pathname); }catch(e){ reject(new Error('エンジンURLが不正です: ' + (eng?eng.name:''))); return; }
+    const req = http.request({
+      hostname: u.hostname, port: u.port || 80, path: u.pathname + u.search,
+      method: method,
+      headers: body ? {'Content-Type':'application/json', 'Content-Length': Buffer.byteLength(body)} : {}
+    }, (res)=>{
+      const chunks = [];
+      res.on('data', c=>chunks.push(c));
+      res.on('end', ()=>{
+        const buf = Buffer.concat(chunks);
+        if(res.statusCode >= 200 && res.statusCode < 300) resolve(buf);
+        else reject(new Error((eng?eng.name:'ENGINE') + ' HTTP ' + res.statusCode + ': ' + buf.toString('utf8').slice(0, 200)));
+      });
+    });
+    req.setTimeout(timeoutMs || 30000, ()=>{ req.destroy(new Error('タイムアウト')); });
+    req.on('error', reject);
+    if(body) req.write(body);
+    req.end();
+  });
+}
+async function vvAlive(eng, timeoutMs){
+  try{ await vvRequest(eng, 'GET', '/version', null, timeoutMs || 1500); return true; }
+  catch(e){ return false; }
+}
+async function ensureVvEngine(eng){
+  if(await vvAlive(eng, 1500)) return true;
+  if(!$('vvAutoLaunch').checked) throw new Error(eng.name + ' に接続できません。エンジンを起動してください');
+  const exe = (eng.exe || '').trim();
+  if(!exe || !fs.existsSync(exe)) throw new Error(eng.name + ' が起動しておらず、実行ファイルも未設定です(設定を確認)');
+  setStatus(eng.name + ' を起動中...(初回は時間がかかります)', 'run');
+  try{
+    const proc = cp.spawn(exe, [], {detached:true, stdio:'ignore', cwd: path.dirname(exe)});
+    proc.unref();
+  }catch(e){ throw new Error(eng.name + ' の起動に失敗: ' + e.message); }
+  const t0 = Date.now();
+  while(Date.now() - t0 < 90000){
+    await new Promise(r=>setTimeout(r, 2000));
+    if(await vvAlive(eng, 1500)) return true;
+  }
+  throw new Error(eng.name + ' の起動を確認できませんでした');
+}
+function parseVvVoice(voiceId){
+  const m = String(voiceId).match(/^vv:(.+):(\d+)$/);
+  if(!m) return null;
+  const eng = engines.find(e=>e.name === m[1]);
+  if(!eng) return null;
+  return {eng: eng, styleId: m[2]};
+}
+async function vvSynthToFile(voiceId, text, wavPath){
+  const v = parseVvVoice(voiceId);
+  if(!v) throw new Error('エンジンが見つかりません(設定で削除された可能性があります)');
+  await ensureVvEngine(v.eng);
+  const q = await vvRequest(v.eng, 'POST', '/audio_query?speaker=' + v.styleId + '&text=' + encodeURIComponent(text), null, 30000);
+  const wav = await vvRequest(v.eng, 'POST', '/synthesis?speaker=' + v.styleId, q.toString('utf8'), 120000);
+  fs.writeFileSync(wavPath, wav);
+}
+
+// ================= A.I.VOICE2 =================
+function bridgePath(){
+  const extPath = decodeURIComponent(
+    window.__adobe_cep__.getSystemPath('extension').replace(/^file:\/{2,3}/, '')
+  ).replace(/\//g, '\\');
+  return path.join(extPath, 'bridge', 'aivoice2_bridge.ps1');
+}
+function runBridge(args){
+  return new Promise((resolve)=>{
+    const avExe = $('avExePath').value.trim();
+    const extra = avExe ? ['-ExePath', avExe] : [];
+    cp.execFile(PS_EXE,
+      ['-NoProfile','-ExecutionPolicy','Bypass','-File', bridgePath()].concat(args).concat(extra),
+      {windowsHide:true},
+      (err, stdout)=>{
+        const out = String(stdout||'').trim();
+        if(err || out.indexOf('ERR:') === 0){
+          resolve({ok:false, msg: out.replace(/^ERR:\s*/,'') || 'ブリッジの実行に失敗しました'});
+        } else {
+          resolve({ok:true});
+        }
+      });
+  });
+}
+function pollNewWav(dir, sinceMs, timeoutMs){
+  return new Promise((resolve)=>{
+    const t0 = Date.now();
+    const iv = setInterval(()=>{
+      try{
+        const files = fs.readdirSync(dir).filter(f=>/\.wav$/i.test(f));
+        let newest = null, nm = sinceMs;
+        for(const f of files){
+          const st = fs.statSync(path.join(dir, f));
+          if(st.mtimeMs > nm){ nm = st.mtimeMs; newest = f; }
+        }
+        if(newest){
+          clearInterval(iv);
+          setTimeout(()=>resolve(path.join(dir, newest)), 800);
+          return;
+        }
+      }catch(e){}
+      if(Date.now() - t0 > timeoutMs){ clearInterval(iv); resolve(null); }
+    }, 1500);
+  });
+}
+
+// ================= 行の再生 =================
+async function playRow(row){
+  const text = (row.text||'').trim();
+  if(!text){ setStatus('セリフを入力してください', 'err'); return; }
+  stopAll(true);
+  try{
+    if(row.voice.indexOf('aq:') === 0){
+      setStatus('再生中(AquesTalk)...', 'run');
+      const r = await runAques(['/T', text, '/P', row.voice.slice(3)]);
+      if(r.code === 'noexe'){ setStatus('AquesTalkPlayer.exe が見つかりません(設定を確認)', 'err'); return; }
+      if(r.code === 'killed'){ setStatus('停止しました'); return; }
+      if(r.code !== 0){ setStatus('エラー(' + r.code + '): ' + errMsg(r.code), 'err'); return; }
+      setStatus('再生完了', 'ok');
+    } else if(row.voice.indexOf('vv:') === 0){
+      setStatus('合成中(VOICEVOX)...', 'run');
+      const tmp = path.join(os.tmpdir(), 'voicedesk_preview.wav');
+      await vvSynthToFile(row.voice, text, tmp);
+      currentAudio = new Audio('file:///' + tmp.replace(/\\/g, '/') + '?' + Date.now());
+      currentAudio.onended = ()=>{ currentAudio = null; setStatus('再生完了', 'ok'); };
+      setStatus('再生中(VOICEVOX)...', 'run');
+      await currentAudio.play();
+    } else if(row.voice === AV_VOICE){
+      setStatus('A.I.VOICE2で再生中...', 'run');
+      const r = await runBridge(['-Action','play','-Text', text]);
+      if(!r.ok){ setStatus('A.I.VOICE2エラー: ' + r.msg, 'err'); return; }
+      setStatus('A.I.VOICE2: 再生を開始しました', 'ok');
+    }
+  }catch(e){
+    setStatus('エラー: ' + e.message, 'err');
+  }
+}
+function stopAll(silent){
+  if(currentProc){ try{ currentProc.kill(); }catch(e){} currentProc = null; }
+  if(currentAudio){ try{ currentAudio.pause(); }catch(e){} currentAudio = null; }
+  if(!silent) setStatus('停止しました');
+}
+$('btnStopAll').addEventListener('click', ()=>stopAll(false));
+
+// ================= 全行保存 =================
+let saving = false;
+$('btnSaveAll').addEventListener('click', async ()=>{
+  if(saving) return;
+  const rows = rowsData.filter(r=>(r.text||'').trim());
+  if(rows.length === 0){ setStatus('セリフを入力してください', 'err'); return; }
+  const dir = $('outDir').value.trim();
+  if(!dir){ setStatus('WAV出力フォルダを設定してください', 'err'); return; }
+  if(!fs.existsSync(dir)){
+    try{ fs.mkdirSync(dir, {recursive:true}); }
+    catch(e){ setStatus('出力フォルダを作成できません:\n' + dir, 'err'); return; }
+  }
+  const insAudio = $('insAudio').checked;
+  const GAP = 0.25;
+  let offset = 0, ok = 0;
+  saving = true;
+  $('btnSaveAll').disabled = true;
+  try{
+    for(let i = 0; i < rows.length; i++){
+      const row = rows[i];
+      const text = row.text.trim();
+      setStatus('保存中... (' + (i+1) + '/' + rows.length + ')\n' + text, 'run');
+      let wavPath = null;
+
+      if(row.voice.indexOf('aq:') === 0){
+        wavPath = uniqueWavPath(dir, wavBaseName(row.voice, text));
+        const r = await runAques(['/T', text, '/P', row.voice.slice(3), '/W', wavPath]);
+        if(r.code === 'noexe'){ setStatus('AquesTalkPlayer.exe が見つかりません(設定を確認)', 'err'); return; }
+        if(r.code !== 0){ setStatus('AquesTalkエラー(' + r.code + '): ' + errMsg(r.code) + '\n' + text + '\n(' + ok + '件保存済み)', 'err'); return; }
+      } else if(row.voice.indexOf('vv:') === 0){
+        wavPath = uniqueWavPath(dir, wavBaseName(row.voice, text));
+        await vvSynthToFile(row.voice, text, wavPath);
+      } else if(row.voice === AV_VOICE){
+        const avDir = $('avOutDir').value.trim();
+        if(!avDir || !fs.existsSync(avDir)){ setStatus('A.I.VOICE2の書き出し先フォルダを設定してください', 'err'); return; }
+        const since = Date.now();
+        const r = await runBridge(['-Action','save','-Text', text]);
+        if(!r.ok){ setStatus('A.I.VOICE2エラー: ' + r.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
+        setStatus('A.I.VOICE2の書き出しを待っています... (' + (i+1) + '/' + rows.length + ')', 'run');
+        wavPath = await pollNewWav(avDir, since, 120000);
+        if(!wavPath){ setStatus('A.I.VOICE2の書き出しを検知できませんでした\n(' + ok + '件保存済み)', 'err'); return; }
+      } else {
+        continue;
+      }
+
+      if($('makeTxt').checked){
+        const txtPath = wavPath.replace(/\.wav$/i, '.txt');
+        if(!fs.existsSync(txtPath)) await writeTxt(txtPath, text);
+      }
+      if(insAudio){
+        const p = await placeAudio(wavPath, trackFor(row.voice), offset);
+        if(!p.ok){ setStatus(p.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
+        offset += wavDurationSec(wavPath) + GAP;
+      }
+      ok++;
+      addHistory(voiceShortName(row.voice) + ' | ' + path.basename(wavPath));
+    }
+    setStatus('保存完了: ' + ok + '件' + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
+  }catch(e){
+    setStatus('エラー: ' + e.message + '\n(' + ok + '件保存済み)', 'err');
+  }finally{
+    saving = false;
+    $('btnSaveAll').disabled = false;
+  }
+});
+
+// ================= ツール: 字幕一括生成 =================
+$('btnMakeCaptions').addEventListener('click', async ()=>{
+  setStatus('クリップ情報を取得中...', 'run');
+  const r = await evalJsx('getSelectedAudioClips', []);
+  if(String(r).indexOf('ERR:') === 0){ setStatus(jsxErrMsg(r), 'err'); return; }
+
+  const rows = String(r).replace(/^OK:/, '').split('\n').filter(Boolean);
+  const entries = [];
+  let noTxt = 0;
+  for(const row of rows){
+    const parts = row.split('\t');
+    const mediaPath = parts[0];
+    if(!mediaPath) continue;
+    const txtPath = mediaPath.replace(/\.[^.\\\/]+$/, '.txt');
+    const text = fs.existsSync(txtPath) ? readTxtAuto(txtPath) : null;
+    if(text){
+      entries.push({start: parseFloat(parts[1]), end: parseFloat(parts[2]), text: text});
+    } else {
+      noTxt++;
+    }
+  }
+  if(entries.length === 0){
+    setStatus('字幕にできるクリップがありません(同名のtxtファイルが見つかりません)', 'err');
+    return;
+  }
+  entries.sort((a,b)=>a.start - b.start);
+
+  const dir = $('outDir').value.trim() || path.dirname(rows[0].split('\t')[0]);
+  const d = new Date();
+  const p2 = n=>String(n).padStart(2,'0');
+  const srtPath = path.join(dir, 'captions_' + d.getFullYear() + p2(d.getMonth()+1) + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '.srt');
+  writeSrt(srtPath, entries);
+
+  setStatus('字幕トラックを挿入中...', 'run');
+  const r2 = await evalJsx('insertCaption', [srtPath]);
+  if(String(r2).indexOf('ERR:') === 0){ setStatus(jsxErrMsg(r2), 'err'); return; }
+  let msg = '字幕を生成しました: ' + entries.length + '件を1トラックに挿入';
+  if(noTxt > 0) msg += '\n(txtが見つからず ' + noTxt + ' クリップをスキップ)';
+  setStatus(msg, 'ok');
+});
+
+// ================= 初期化 =================
+loadSettings();
+renderEngines();
+buildVoiceList();
+renderRows();
+reloadVoices();
+</script>
+</body>
+</html>
