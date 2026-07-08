@@ -61,6 +61,7 @@
   .vrow input.rtext{flex:1; min-width:60px;}
   .vrow button{padding:6px 7px; flex:0 0 auto;}
   .vrow button.rdel{color:var(--muted);}
+  .vrow.saved select.rvoice, .vrow.saved input.rtext{opacity:.4;}
   .engbox{border:1px solid var(--border); border-radius:6px; padding:6px; margin-bottom:6px;}
   .engbox .row{margin-bottom:4px;}
   .engbox input.ename{width:110px; flex:0 0 auto;}
@@ -130,6 +131,7 @@
     </div>
     <div class="btns">
       <button class="primary" id="btnSaveAll">全行を保存</button>
+      <button id="btnDelSaved">使用済みを削除</button>
     </div>
     <div class="hint">行の「A」は配置先オーディオトラック(声ごとに記憶)。複数行のテキストを貼り付けると自動で行に分かれます。</div>
   </div>
@@ -185,7 +187,7 @@ function jsxErrMsg(raw){
 let trackMap = {};      // voiceId -> track番号
 let engines = [];       // [{name, url, exe}] VOICEVOX互換エンジン
 let vvSpeakerCache = {}; // engineName -> [{id, label}]
-let rowsData = [];      // [{voice, text}]
+let rowsData = [];      // [{voice, text, saved?}]
 
 function loadSettings(){
   let s = {};
@@ -408,6 +410,7 @@ function renderRows(){
   rowsData.forEach((row, idx)=>{
     const div = document.createElement('div');
     div.className = 'vrow';
+    if(row.saved) div.classList.add('saved');
 
     const sel = document.createElement('select');
     sel.className = 'rvoice';
@@ -419,7 +422,12 @@ function renderRows(){
     if(!row.voice && voiceList.length) row.voice = voiceList[0].id;
     sel.value = row.voice;
     if(sel.value !== row.voice){ row.voice = sel.value; } // リストに無い場合の補正
-    sel.addEventListener('change', ()=>{ row.voice = sel.value; trk.value = trackFor(row.voice); saveSettings(); });
+    sel.addEventListener('change', ()=>{
+      row.voice = sel.value;
+      trk.value = trackFor(row.voice);
+      if(row.saved){ row.saved = false; div.classList.remove('saved'); }
+      saveSettings();
+    });
 
     const trk = document.createElement('input');
     trk.type = 'text'; trk.className = 'num';
@@ -439,7 +447,10 @@ function renderRows(){
     txt.type = 'text'; txt.className = 'rtext';
     txt.placeholder = 'セリフ';
     txt.value = row.text || '';
-    txt.addEventListener('input', ()=>{ row.text = txt.value; });
+    txt.addEventListener('input', ()=>{
+      row.text = txt.value;
+      if(row.saved){ row.saved = false; div.classList.remove('saved'); }
+    });
     txt.addEventListener('change', ()=>{ saveSettings(); });
     txt.addEventListener('paste', (e)=>{
       const t = (e.clipboardData || window.clipboardData).getData('text');
@@ -460,6 +471,11 @@ function renderRows(){
     play.title = 'この行を再生';
     play.addEventListener('click', ()=>playRow(row));
 
+    const save = document.createElement('button');
+    save.textContent = '💾';
+    save.title = 'この行を保存';
+    save.addEventListener('click', ()=>saveRow(row, div, save));
+
     const del = document.createElement('button');
     del.textContent = '×';
     del.className = 'rdel';
@@ -471,7 +487,7 @@ function renderRows(){
       renderRows();
     });
 
-    div.appendChild(sel); div.appendChild(trk); div.appendChild(txt); div.appendChild(play); div.appendChild(del);
+    div.appendChild(sel); div.appendChild(trk); div.appendChild(txt); div.appendChild(play); div.appendChild(save); div.appendChild(del);
     box.appendChild(div);
   });
 }
@@ -760,6 +776,61 @@ function pollNewWav(dir, sinceMs, timeoutMs){
   });
 }
 
+// ================= 1行分の保存処理(全行保存・個別保存で共有) =================
+// ctx = {dir, avDir, insAudio, offset}
+// 戻り値: {ok, wavPath, msg, advance}
+async function saveOneRow(row, ctx){
+  const text = row.text.trim();
+  const dir = ctx.dir;
+  const GAP = 0.25;
+  let wavPath = null;
+
+  if(row.voice.indexOf('aq:') === 0){
+    const vDir = voiceOutDir(dir, row.voice);
+    wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
+    const r = await runAques(['/T', text, '/P', row.voice.slice(3), '/W', wavPath]);
+    if(r.code === 'noexe'){ return {ok:false, msg:'AquesTalkPlayer.exe が見つかりません(設定を確認)'}; }
+    if(r.code !== 0){ return {ok:false, msg:'AquesTalkエラー(' + r.code + '): ' + errMsg(r.code) + '\n' + text}; }
+  } else if(row.voice.indexOf('vv:') === 0){
+    const vDir = voiceOutDir(dir, row.voice);
+    wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
+    await vvSynthToFile(row.voice, text, wavPath);
+  } else if(row.voice === AV_VOICE){
+    const avDir = ctx.avDir;
+    if(!avDir || !fs.existsSync(avDir)){ return {ok:false, msg:'A.I.VOICE2の書き出し先フォルダを設定してください'}; }
+    const avErr = checkAvExePath();
+    if(avErr){ return {ok:false, msg: avErr}; }
+    const since = Date.now();
+    const r = await runBridge(['-Action','save','-Text', text]);
+    if(!r.ok){ return {ok:false, msg:'A.I.VOICE2エラー: ' + r.msg}; }
+    setStatus('A.I.VOICE2の書き出しを待っています...\n' + text, 'run');
+    const rawWavPath = await pollNewWav(avDir, since, 120000);
+    if(!rawWavPath){ return {ok:false, msg:'A.I.VOICE2の書き出しを検知できませんでした'}; }
+    const avSubDir = voiceOutDir(avDir, AV_VOICE);
+    const avDestPath = nextSeqWavPath(avSubDir, wavBaseName(row.voice, text));
+    try{
+      fs.renameSync(rawWavPath, avDestPath);
+      wavPath = avDestPath;
+    }catch(e){
+      wavPath = rawWavPath;
+    }
+  } else {
+    return {ok:true, wavPath:null, msg:'', advance:0};
+  }
+
+  if($('makeTxt').checked){
+    const txtPath = wavPath.replace(/\.wav$/i, '.txt');
+    if(!fs.existsSync(txtPath)) await writeTxt(txtPath, text);
+  }
+  let advance = 0;
+  if(ctx.insAudio){
+    const p = await placeAudio(wavPath, trackFor(row.voice), ctx.offset || 0, voiceFolderName(row.voice));
+    if(!p.ok){ return {ok:false, msg:p.msg}; }
+    advance = wavDurationSec(wavPath) + GAP;
+  }
+  return {ok:true, wavPath: wavPath, msg:'', advance: advance};
+}
+
 // ================= 行の再生 =================
 async function playRow(row){
   const text = (row.text||'').trim();
@@ -800,8 +871,48 @@ function stopAll(silent){
 }
 $('btnStopAll').addEventListener('click', ()=>stopAll(false));
 
-// ================= 全行保存 =================
+// ================= 個別保存 =================
 let saving = false;
+async function saveRow(row, div, saveBtn){
+  if(saving) return;
+  const text = (row.text||'').trim();
+  if(!text){ setStatus('セリフを入力してください', 'err'); return; }
+  const dir = $('outDir').value.trim();
+  if(!dir){ setStatus('WAV出力フォルダを設定してください', 'err'); return; }
+  if(!fs.existsSync(dir)){
+    try{ fs.mkdirSync(dir, {recursive:true}); }
+    catch(e){ setStatus('出力フォルダを作成できません:\n' + dir, 'err'); return; }
+  }
+  const avDir = $('avOutDir').value.trim();
+  if(row.voice === AV_VOICE){
+    if(!avDir || !fs.existsSync(avDir)){ setStatus('A.I.VOICE2の書き出し先フォルダを設定してください', 'err'); return; }
+    const avErr = checkAvExePath();
+    if(avErr){ setStatus(avErr, 'err'); return; }
+  }
+  const insAudio = $('insAudio').checked;
+  saving = true;
+  saveBtn.disabled = true;
+  $('btnSaveAll').disabled = true;
+  try{
+    setStatus('保存中...\n' + text, 'run');
+    const res = await saveOneRow(row, {dir:dir, avDir:avDir, insAudio:insAudio, offset:0});
+    if(!res.ok){ setStatus(res.msg, 'err'); return; }
+    if(!res.wavPath){ setStatus('保存対象外の行です', 'err'); return; }
+    row.saved = true;
+    div.classList.add('saved');
+    addHistory(voiceShortName(row.voice) + ' | ' + path.basename(res.wavPath));
+    saveSettings();
+    setStatus('保存しました: ' + path.basename(res.wavPath) + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
+  }catch(e){
+    setStatus('エラー: ' + e.message, 'err');
+  }finally{
+    saving = false;
+    saveBtn.disabled = false;
+    $('btnSaveAll').disabled = false;
+  }
+}
+
+// ================= 全行保存 =================
 $('btnSaveAll').addEventListener('click', async ()=>{
   if(saving) return;
   const rows = rowsData.filter(r=>(r.text||'').trim());
@@ -813,7 +924,7 @@ $('btnSaveAll').addEventListener('click', async ()=>{
     catch(e){ setStatus('出力フォルダを作成できません:\n' + dir, 'err'); return; }
   }
   const insAudio = $('insAudio').checked;
-  const GAP = 0.25;
+  const avDir = $('avOutDir').value.trim();
   let offset = 0, ok = 0;
   saving = true;
   $('btnSaveAll').disabled = true;
@@ -822,52 +933,13 @@ $('btnSaveAll').addEventListener('click', async ()=>{
       const row = rows[i];
       const text = row.text.trim();
       setStatus('保存中... (' + (i+1) + '/' + rows.length + ')\n' + text, 'run');
-      let wavPath = null;
-
-      if(row.voice.indexOf('aq:') === 0){
-        const vDir = voiceOutDir(dir, row.voice);
-        wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
-        const r = await runAques(['/T', text, '/P', row.voice.slice(3), '/W', wavPath]);
-        if(r.code === 'noexe'){ setStatus('AquesTalkPlayer.exe が見つかりません(設定を確認)', 'err'); return; }
-        if(r.code !== 0){ setStatus('AquesTalkエラー(' + r.code + '): ' + errMsg(r.code) + '\n' + text + '\n(' + ok + '件保存済み)', 'err'); return; }
-      } else if(row.voice.indexOf('vv:') === 0){
-        const vDir = voiceOutDir(dir, row.voice);
-        wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
-        await vvSynthToFile(row.voice, text, wavPath);
-      } else if(row.voice === AV_VOICE){
-        const avDir = $('avOutDir').value.trim();
-        if(!avDir || !fs.existsSync(avDir)){ setStatus('A.I.VOICE2の書き出し先フォルダを設定してください', 'err'); return; }
-        const avErr = checkAvExePath();
-        if(avErr){ setStatus(avErr + '\n(' + ok + '件保存済み)', 'err'); return; }
-        const since = Date.now();
-        const r = await runBridge(['-Action','save','-Text', text]);
-        if(!r.ok){ setStatus('A.I.VOICE2エラー: ' + r.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
-        setStatus('A.I.VOICE2の書き出しを待っています... (' + (i+1) + '/' + rows.length + ')', 'run');
-        const rawWavPath = await pollNewWav(avDir, since, 120000);
-        if(!rawWavPath){ setStatus('A.I.VOICE2の書き出しを検知できませんでした\n(' + ok + '件保存済み)', 'err'); return; }
-        const avSubDir = voiceOutDir(avDir, AV_VOICE);
-        const avDestPath = nextSeqWavPath(avSubDir, wavBaseName(row.voice, text));
-        try{
-          fs.renameSync(rawWavPath, avDestPath);
-          wavPath = avDestPath;
-        }catch(e){
-          wavPath = rawWavPath;
-        }
-      } else {
-        continue;
-      }
-
-      if($('makeTxt').checked){
-        const txtPath = wavPath.replace(/\.wav$/i, '.txt');
-        if(!fs.existsSync(txtPath)) await writeTxt(txtPath, text);
-      }
-      if(insAudio){
-        const p = await placeAudio(wavPath, trackFor(row.voice), offset, voiceFolderName(row.voice));
-        if(!p.ok){ setStatus(p.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
-        offset += wavDurationSec(wavPath) + GAP;
-      }
+      const res = await saveOneRow(row, {dir:dir, avDir:avDir, insAudio:insAudio, offset:offset});
+      if(!res.ok){ setStatus(res.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
+      if(!res.wavPath) continue;
+      offset += res.advance || 0;
+      row.saved = true;
       ok++;
-      addHistory(voiceShortName(row.voice) + ' | ' + path.basename(wavPath));
+      addHistory(voiceShortName(row.voice) + ' | ' + path.basename(res.wavPath));
     }
     setStatus('保存完了: ' + ok + '件' + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
   }catch(e){
@@ -875,7 +947,28 @@ $('btnSaveAll').addEventListener('click', async ()=>{
   }finally{
     saving = false;
     $('btnSaveAll').disabled = false;
+    saveSettings();
+    renderRows();
   }
+});
+
+// ================= 使用済み行を削除 =================
+function removeSavedRows(rows, defaultVoice){
+  const remaining = rows.filter(r=>!r.saved);
+  if(remaining.length === 0){
+    return [{voice: defaultVoice || '', text: ''}];
+  }
+  return remaining;
+}
+
+$('btnDelSaved').addEventListener('click', ()=>{
+  const savedCount = rowsData.filter(r=>r.saved).length;
+  if(savedCount === 0){ setStatus('保存済みの行がありません'); return; }
+  if(!confirm(savedCount + '件の使用済み行を削除します。よろしいですか?')) return;
+  rowsData = removeSavedRows(rowsData, (voiceList[0]||{}).id || '');
+  saveSettings();
+  renderRows();
+  setStatus(savedCount + '件を削除しました', 'ok');
 });
 
 // ================= ツール: 字幕一括生成 =================

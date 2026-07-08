@@ -1,6 +1,6 @@
 # VoiceDesk 仕様書(開発者向け)
 
-バージョン: 2.1.0 / ライセンス: MIT
+バージョン: 1.1.0 / ライセンス: MIT
 
 ## 1. 概要
 
@@ -48,9 +48,11 @@ voicedesk/
   "makeTxt": true, "namePrefix": false, "insAudio": false,
   "trackMap": {"voiceId": "トラック番号"},
   "vvSpeakerCache": {"エンジン名": [{"id":3,"label":"ずんだもん(ノーマル)"}]},
-  "rowsData": [{"voice":"voiceId","text":"セリフ"}]
+  "rowsData": [{"voice":"voiceId","text":"セリフ","saved":true}]
 }
 ```
+- `saved`(任意)は個別保存/全行保存で書き出し済みになった行に付く。声・セリフを編集すると
+  解除される。localStorageに永続化されるためパネル再起動後も保持される
 
 ### voiceId 形式
 - `aq:<プリセット名>` … AquesTalk (例 `aq:れいむ`)
@@ -114,6 +116,14 @@ voicedesk/
   `avOutDir/AIVOICE2/<連番>_....wav`へ移動する。移動失敗時は元のパスのまま処理を続行する
 - `insAudio`ON時は`placeAudio`→`placeVoice`の第4引数(binName)に`voiceFolderName(voiceId)`を
   渡し、PremiereのVoiceDeskビン配下に同名のサブビンが作られてそこにインポートされる
+- 1行分の保存処理は`saveOneRow(row, ctx)`(`ctx = {dir, avDir, insAudio, offset}`、戻り値
+  `{ok, wavPath, msg, advance}`)に集約されており、全行保存(`btnSaveAll`)と行ごとの
+  個別保存(`saveRow`、💾ボタン)の両方から呼ばれる。連番・フォルダ構成・txt生成・
+  A.I.VOICE2のrename処理はこの関数に一元化されている
+- 保存に成功した行は`row.saved=true`になり、グレー表示される。「使用済みを削除」
+  (`btnDelSaved`)は`saved`が立った行だけを一括削除する(全削除になる場合は空行を1つ残す)。
+  この一括削除の配列操作は純粋関数`removeSavedRows(rows, defaultVoice)`に切り出されており、
+  `node --test`でテスト対象になっている
 
 ## 6. 重要な実装上の注意(ハマりどころ)
 

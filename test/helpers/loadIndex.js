@@ -63,6 +63,7 @@ const EPILOGUE = [
   '  voiceOutDir: voiceOutDir,',
   '  wavDurationSec: wavDurationSec,',
   '  writeSrt: writeSrt,',
+  '  removeSavedRows: removeSavedRows,',
   '  __setState: function(s){',
   '    if(s.engines)        engines = s.engines;',
   '    if(s.trackMap)       trackMap = s.trackMap;',
