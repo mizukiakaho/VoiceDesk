@@ -10,6 +10,16 @@ $._AQV_.getVoiceBin = function () {
     return root.createBin('VoiceDesk');
 };
 
+$._AQV_.getVoiceSubBin = function (subName) {
+    var root = $._AQV_.getVoiceBin();
+    if (!subName) return root;
+    for (var i = 0; i < root.children.numItems; i++) {
+        var c = root.children[i];
+        if (c && c.type === ProjectItemType.BIN && c.name === subName) { return c; }
+    }
+    return root.createBin(subName);
+};
+
 $._AQV_.findByPath = function (bin, p) {
     var norm = String(p).replace(/\\/g, '/').toLowerCase();
     for (var j = 0; j < bin.children.numItems; j++) {
@@ -31,12 +41,13 @@ $._AQV_.ensureImported = function (bin, p) {
 };
 
 // place audio clip at playhead + offsetSec on given track (1-based)
-$._AQV_.placeVoice = function (wavPath, audioTrack, offsetSec) {
+// binName: optional sub-bin name under VoiceDesk bin (e.g. engine+character name)
+$._AQV_.placeVoice = function (wavPath, audioTrack, offsetSec, binName) {
     try {
         var seq = app.project.activeSequence;
         if (!seq) return 'ERR:NO_SEQUENCE';
         var pos = seq.getPlayerPosition().seconds + Number(offsetSec || 0);
-        var bin = $._AQV_.getVoiceBin();
+        var bin = $._AQV_.getVoiceSubBin(binName);
         var wavItem = $._AQV_.ensureImported(bin, wavPath);
         if (!wavItem) return 'ERR:IMPORT_WAV';
         var tIdx = Math.floor(Number(audioTrack)) - 1;

@@ -82,12 +82,38 @@ voicedesk/
 - 出力: 標準出力に `OK: ...` / `ERR: メッセージ`
 
 ### Premiere ExtendScript ($._AQV_ 名前空間 / jsx/host.jsx)
-- `placeVoice(wavPath, audioTrack, offsetSec)` … VoiceDeskビンにインポートし
-  再生ヘッド+offset位置の指定トラックへ overwriteClip
+- `placeVoice(wavPath, audioTrack, offsetSec, binName)` … VoiceDeskビン(binName指定時は
+  その配下のサブビン、`getVoiceSubBin`で取得/作成)にインポートし
+  再生ヘッド+offset位置の指定トラックへ overwriteClip。binNameが空/未指定なら
+  従来通りVoiceDeskビン直下(後方互換)
+- `getVoiceSubBin(subName)` … VoiceDeskビン直下のsubName名サブビンを取得、無ければ作成。
+  subNameが空ならVoiceDeskビン自体を返す
 - `getSelectedAudioClips()` … 選択中(無ければターゲットトラック全)音声クリップの
   `mediaPath\tstart\tend` 一覧を返す
-- `insertCaption(srtPath)` … SRTをインポートし createCaptionTrack(item, 0)
+- `insertCaption(srtPath)` … SRTをインポートし createCaptionTrack(item, 0)(VoiceDeskビン直下、
+  サブビン分けの対象外)
 - 戻り値規約: `OK:...` / `ERR:<コード>`。コードは index.html の JSX_ERR で日本語化
+
+### 保存時のフォルダ構成・連番仕様(index.html)
+- 全行保存時、WAV/txtは `outDir` 直下ではなく `outDir/<フォルダ名>/` に保存される
+  (`voiceFolderName(voiceId)` で決定、`voiceOutDir()` が存在しなければ作成)。
+  - `aq:<プリセット名>` → `AQ_<プリセット名>`
+  - `vv:<エンジン名>:<styleId>` → `<エンジン名>_<キャラ名>`(styleIdからvvSpeakerCacheを
+    引いてスタイル部分を除いたキャラ名を解決。スタイル違いは同一フォルダに統合される)
+  - `av`(A.I.VOICE2) → 固定 `AIVOICE2`
+  - フォルダ名は `safeFileName` で禁則文字除去・空白を`_`に置換
+- ファイル名は `<連番3桁>_[キャラ名_]セリフ.wav`(`nextSeqWavPath()`がフォルダ内の
+  既存ファイルから`^(\d+)_`最大値を走査し+1、3桁ゼロ埋めして採番。フォルダ内のみで
+  独立カウントし、既存ファイルは上書きしない)。`namePrefix`設定ONの場合はセリフ部分の前に
+  キャラ名(`wavBaseName`)が付く。衝突時は`uniqueWavPath`で`_1`等のサフィックスを追加
+- txtは最終的なWAVパスと同じフォルダ・同じベース名で生成される(字幕生成が前提とする
+  「WAVと同名txt」を維持)
+- A.I.VOICE2は`voiceId`が常に`av`のみで話者を判別できないため専用フォルダ
+  `avOutDir/AIVOICE2/`に統一。`pollNewWav`によるWAV検知は従来通り`avOutDir`直下のみを
+  監視(サブフォルダは監視対象外)し、検知後に`fs.renameSync`で
+  `avOutDir/AIVOICE2/<連番>_....wav`へ移動する。移動失敗時は元のパスのまま処理を続行する
+- `insAudio`ON時は`placeAudio`→`placeVoice`の第4引数(binName)に`voiceFolderName(voiceId)`を
+  渡し、PremiereのVoiceDeskビン配下に同名のサブビンが作られてそこにインポートされる
 
 ## 6. 重要な実装上の注意(ハマりどころ)
 
@@ -111,3 +137,8 @@ voicedesk/
 - JS構文チェック: `node --check`(scriptタグ内を抽出して実行)
 - デバッグ: `%APPDATA%\Adobe\CEP\extensions\voicedesk` を直接編集し
   パネルを閉じて開き直すと反映される。CEFデバッグは .debug ファイルで可能
+- 自動テスト: リポジトリ直下で `node --test`(または `npm test`)を実行すると、
+  `test/helpers/loadIndex.js` が index.html を無変更のまま node:vm で読み込み、
+  ファイル名/パス計算・SRT生成・エラーメッセージ変換などの副作用の少ない純粋ロジックを
+  単体テストする。Premiere操作・A.I.VOICE2連携(UIAutomation)・実際の音声合成エンジンとの
+  通信は実環境前提のためテスト対象外

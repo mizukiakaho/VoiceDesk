@@ -9,7 +9,7 @@
 param(
     [string]$Text = "",
     [string]$Action = "play",
-    [string]$ExePath = "C:\Program Files\AI\AIVoice2\AIVoice2Editor\aivoice.exe"
+    [string]$ExePath = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +36,9 @@ public static class W32 {
 function Get-AivoiceWindow {
     $ps = Get-Process -Name "aivoice" -ErrorAction SilentlyContinue
     if (-not $ps) {
+        if ((-not $ExePath) -or (-not (Test-Path $ExePath))) {
+            throw "A.I.VOICE2のexeパスが未設定/不正です。設定でaivoice.exeのパスを指定してください"
+        }
         Start-Process -FilePath $ExePath | Out-Null
         $deadline = (Get-Date).AddSeconds(90)
         while ((Get-Date) -lt $deadline) {

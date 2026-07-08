@@ -75,7 +75,7 @@
     <div class="subhead" style="border-top:none; padding-top:0;">共通</div>
     <label class="fld">WAV出力フォルダ</label>
     <div class="row">
-      <input type="text" id="outDir" placeholder="例: D:\素材\ボイス">
+      <input type="text" id="outDir" placeholder="例: C:\\...\\voice">
       <button class="fit" id="btnBrowseOutDir">参照</button>
     </div>
     <label class="fld">txtファイルの文字コード</label>
@@ -105,7 +105,7 @@
     <div class="subhead">A.I.VOICE2</div>
     <label class="fld">aivoice.exe のパス</label>
     <div class="row">
-      <input type="text" id="avExePath" placeholder="例: C:\\Program Files\\AI\\AIVoice2\\AIVoice2Editor\\aivoice.exe">
+      <input type="text" id="avExePath" placeholder="例: C:\\...\\aivoice.exe">
       <button class="fit" id="btnBrowseAvExe">参照</button>
     </div>
     <label class="fld">A.I.VOICE2の書き出し先フォルダ(保存・配置に使用)</label>
@@ -122,6 +122,7 @@
       <span style="font-weight:700;">掛け合いエディタ</span>
       <button class="fit" id="btnReloadVoices" title="声リストを再読込">&#8635;</button>
     </div>
+    <div class="hint">トラック欄(数字)は声ごとに共有されます。同じ声を使っている行のトラック番号を変更すると、他の行のトラック番号も連動して変わります。</div>
     <div id="rows"></div>
     <div class="btns">
       <button id="btnAddRow">＋ 行を追加</button>
@@ -422,7 +423,7 @@ function renderRows(){
 
     const trk = document.createElement('input');
     trk.type = 'text'; trk.className = 'num';
-    trk.title = 'この声の配置先オーディオトラック';
+    trk.title = 'この声の配置先オーディオトラック(声ごとに共有され、同じ声の全行に連動します)';
     trk.value = trackFor(row.voice);
     trk.addEventListener('change', ()=>{
       trackMap[row.voice] = trk.value.trim() || '1';
@@ -510,6 +511,47 @@ function wavBaseName(voiceId, text){
   }
   return base;
 }
+function vvCharacterName(voiceId){
+  const v = parseVvVoice(voiceId);
+  if(!v) return '';
+  const cache = vvSpeakerCache[v.eng.name] || [];
+  const sp = cache.find(x=>String(x.id) === String(v.styleId));
+  if(!sp) return '';
+  return sp.label.replace(/[(（].*$/, '');
+}
+function voiceFolderName(voiceId){
+  if(voiceId === AV_VOICE) return 'AIVOICE2';
+  const id = String(voiceId || '');
+  if(id.indexOf('aq:') === 0){
+    return safeFileName('AQ_' + id.slice(3));
+  }
+  if(id.indexOf('vv:') === 0){
+    const v = parseVvVoice(voiceId);
+    const engName = v ? v.eng.name : 'VV';
+    const charName = vvCharacterName(voiceId) || 'unknown';
+    return safeFileName(engName + '_' + charName);
+  }
+  return safeFileName(id || 'voice');
+}
+function voiceOutDir(baseDir, voiceId){
+  const dir = path.join(baseDir, voiceFolderName(voiceId));
+  if(!fs.existsSync(dir)) fs.mkdirSync(dir, {recursive:true});
+  return dir;
+}
+function nextSeqWavPath(dir, baseName){
+  let maxN = 0;
+  try{
+    for(const f of fs.readdirSync(dir)){
+      const m = f.match(/^(\d+)_/);
+      if(m){
+        const n = parseInt(m[1], 10);
+        if(n > maxN) maxN = n;
+      }
+    }
+  }catch(e){}
+  const seq = String(maxN + 1).padStart(3, '0');
+  return uniqueWavPath(dir, seq + '_' + baseName);
+}
 function wavDurationSec(p){
   try{
     const b = fs.readFileSync(p);
@@ -577,8 +619,8 @@ function evalJsx(fn, args){
     }catch(e){ resolve('ERR:' + e.message); }
   });
 }
-async function placeAudio(wavPath, trackNum, offsetSec){
-  const r = await evalJsx('placeVoice', [wavPath, trackNum || '1', offsetSec || 0]);
+async function placeAudio(wavPath, trackNum, offsetSec, binName){
+  const r = await evalJsx('placeVoice', [wavPath, trackNum || '1', offsetSec || 0, binName || '']);
   if(String(r).indexOf('ERR:') === 0) return {ok:false, msg:'シーケンス配置エラー: ' + jsxErrMsg(r)};
   return {ok:true, msg:'配置OK(A' + (trackNum||'1') + ')'};
 }
@@ -672,6 +714,13 @@ function bridgePath(){
   ).replace(/\//g, '\\');
   return path.join(extPath, 'bridge', 'aivoice2_bridge.ps1');
 }
+function checkAvExePath(){
+  const avExe = $('avExePath').value.trim();
+  if(avExe && !fs.existsSync(avExe)){
+    return 'A.I.VOICE2のexeパスが存在しません(設定を確認してください)';
+  }
+  return null;
+}
 function runBridge(args){
   return new Promise((resolve)=>{
     const avExe = $('avExePath').value.trim();
@@ -733,6 +782,8 @@ async function playRow(row){
       setStatus('再生中(VOICEVOX)...', 'run');
       await currentAudio.play();
     } else if(row.voice === AV_VOICE){
+      const avErr = checkAvExePath();
+      if(avErr){ setStatus(avErr, 'err'); return; }
       setStatus('A.I.VOICE2で再生中...', 'run');
       const r = await runBridge(['-Action','play','-Text', text]);
       if(!r.ok){ setStatus('A.I.VOICE2エラー: ' + r.msg, 'err'); return; }
@@ -774,22 +825,34 @@ $('btnSaveAll').addEventListener('click', async ()=>{
       let wavPath = null;
 
       if(row.voice.indexOf('aq:') === 0){
-        wavPath = uniqueWavPath(dir, wavBaseName(row.voice, text));
+        const vDir = voiceOutDir(dir, row.voice);
+        wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
         const r = await runAques(['/T', text, '/P', row.voice.slice(3), '/W', wavPath]);
         if(r.code === 'noexe'){ setStatus('AquesTalkPlayer.exe が見つかりません(設定を確認)', 'err'); return; }
         if(r.code !== 0){ setStatus('AquesTalkエラー(' + r.code + '): ' + errMsg(r.code) + '\n' + text + '\n(' + ok + '件保存済み)', 'err'); return; }
       } else if(row.voice.indexOf('vv:') === 0){
-        wavPath = uniqueWavPath(dir, wavBaseName(row.voice, text));
+        const vDir = voiceOutDir(dir, row.voice);
+        wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
         await vvSynthToFile(row.voice, text, wavPath);
       } else if(row.voice === AV_VOICE){
         const avDir = $('avOutDir').value.trim();
         if(!avDir || !fs.existsSync(avDir)){ setStatus('A.I.VOICE2の書き出し先フォルダを設定してください', 'err'); return; }
+        const avErr = checkAvExePath();
+        if(avErr){ setStatus(avErr + '\n(' + ok + '件保存済み)', 'err'); return; }
         const since = Date.now();
         const r = await runBridge(['-Action','save','-Text', text]);
         if(!r.ok){ setStatus('A.I.VOICE2エラー: ' + r.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
         setStatus('A.I.VOICE2の書き出しを待っています... (' + (i+1) + '/' + rows.length + ')', 'run');
-        wavPath = await pollNewWav(avDir, since, 120000);
-        if(!wavPath){ setStatus('A.I.VOICE2の書き出しを検知できませんでした\n(' + ok + '件保存済み)', 'err'); return; }
+        const rawWavPath = await pollNewWav(avDir, since, 120000);
+        if(!rawWavPath){ setStatus('A.I.VOICE2の書き出しを検知できませんでした\n(' + ok + '件保存済み)', 'err'); return; }
+        const avSubDir = voiceOutDir(avDir, AV_VOICE);
+        const avDestPath = nextSeqWavPath(avSubDir, wavBaseName(row.voice, text));
+        try{
+          fs.renameSync(rawWavPath, avDestPath);
+          wavPath = avDestPath;
+        }catch(e){
+          wavPath = rawWavPath;
+        }
       } else {
         continue;
       }
@@ -799,7 +862,7 @@ $('btnSaveAll').addEventListener('click', async ()=>{
         if(!fs.existsSync(txtPath)) await writeTxt(txtPath, text);
       }
       if(insAudio){
-        const p = await placeAudio(wavPath, trackFor(row.voice), offset);
+        const p = await placeAudio(wavPath, trackFor(row.voice), offset, voiceFolderName(row.voice));
         if(!p.ok){ setStatus(p.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
         offset += wavDurationSec(wavPath) + GAP;
       }
