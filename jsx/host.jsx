@@ -55,6 +55,22 @@ $._AQV_.placeVoice = function (wavPath, audioTrack, offsetSec, binName) {
         if (tIdx >= seq.audioTracks.numTracks) tIdx = seq.audioTracks.numTracks - 1;
         if (seq.audioTracks[tIdx].isLocked()) return 'ERR:TRACK_LOCKED';
         seq.audioTracks[tIdx].overwriteClip(wavItem, pos);
+        var eps = 0.001;
+        var track = seq.audioTracks[tIdx];
+        var found = null;
+        var bestDiff = -1;
+        for (var ci = 0; ci < track.clips.numItems; ci++) {
+            var cc = track.clips[ci];
+            try {
+                var cs = cc.start.seconds;
+                if (Math.abs(cs - pos) <= eps) { found = cc; break; }
+                var diff = Math.abs(cs - pos);
+                if (bestDiff < 0 || diff < bestDiff) { bestDiff = diff; found = cc; }
+            } catch (e3) {}
+        }
+        if (found) {
+            return 'OK:AUDIO\t' + found.start.seconds + '\t' + found.end.seconds;
+        }
         return 'OK:AUDIO';
     } catch (e) {
         return 'ERR:' + e.toString();
@@ -62,29 +78,33 @@ $._AQV_.placeVoice = function (wavPath, audioTrack, offsetSec, binName) {
 };
 
 // list selected audio clips (fallback: all clips on targeted audio tracks)
+// output format per line: mediaPath\tstart\tend\ttrackIndex (trackIndex is 1-based)
+// note: seq.getSelection() is not used because there is no reliable public API
+// to look up which track a selected clip belongs to. instead this loops
+// seq.audioTracks by index and checks clip.isSelected() so the track index
+// is always known.
 $._AQV_.getSelectedAudioClips = function () {
     try {
         var seq = app.project.activeSequence;
         if (!seq) return 'ERR:NO_SEQUENCE';
-        var out = [];
-        var push = function (c) {
-            try {
-                if (c && c.mediaType === 'Audio' && c.projectItem && !c.projectItem.isSequence()) {
-                    out.push(c.projectItem.getMediaPath() + '\t' + c.start.seconds + '\t' + c.end.seconds);
-                }
-            } catch (e1) {}
-        };
-        var sel = seq.getSelection();
-        if (sel && sel.length > 0) {
-            for (var i = 0; i < sel.length; i++) push(sel[i]);
-        }
-        if (out.length === 0) {
-            for (var t = 0; t < seq.audioTracks.numTracks; t++) {
-                if (seq.audioTracks[t].isTargeted()) {
-                    for (var j = 0; j < seq.audioTracks[t].clips.numItems; j++) push(seq.audioTracks[t].clips[j]);
-                }
+        var selOut = [];
+        var tgtOut = [];
+        for (var t = 0; t < seq.audioTracks.numTracks; t++) {
+            var tr = seq.audioTracks[t];
+            var targeted = tr.isTargeted();
+            for (var j = 0; j < tr.clips.numItems; j++) {
+                var c = tr.clips[j];
+                try {
+                    if (!(c && c.mediaType === 'Audio' && c.projectItem && !c.projectItem.isSequence())) continue;
+                    var isSel = false;
+                    try { isSel = c.isSelected(); } catch (e1) { isSel = false; }
+                    var line = c.projectItem.getMediaPath() + '\t' + c.start.seconds + '\t' + c.end.seconds + '\t' + (t + 1);
+                    if (isSel) selOut.push(line);
+                    if (targeted) tgtOut.push(line);
+                } catch (e2) {}
             }
         }
+        var out = (selOut.length > 0) ? selOut : tgtOut;
         if (out.length === 0) return 'ERR:NO_CLIPS';
         return 'OK:' + out.join('\n');
     } catch (e) {

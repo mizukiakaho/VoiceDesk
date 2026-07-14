@@ -65,6 +65,17 @@
   .engbox{border:1px solid var(--border); border-radius:6px; padding:6px; margin-bottom:6px;}
   .engbox .row{margin-bottom:4px;}
   .engbox input.ename{width:110px; flex:0 0 auto;}
+  /* 調声パネル */
+  #vvTuningPanel{
+    display:none; position:fixed; top:30px; left:16px; right:16px;
+    background:var(--panel); border:1px solid var(--accent); border-radius:8px;
+    padding:10px; z-index:100; max-height:85vh; overflow:auto;
+    box-shadow:0 4px 16px rgba(0,0,0,.5);
+  }
+  #vvTuningPanel .vtrow{display:flex; align-items:center; gap:6px; margin-bottom:6px;}
+  #vvTuningPanel .vtlabel{flex:0 0 74px; color:var(--muted); font-size:11px;}
+  #vvTuningPanel input[type=range]{flex:1;}
+  #vvTuningPanel input.vtnum{width:56px; flex:0 0 auto; text-align:center; padding:6px 2px;}
 </style>
 </head>
 <body>
@@ -87,6 +98,13 @@
     <label class="chk"><input type="checkbox" id="makeTxt" checked>保存時にtxt(字幕用)も作る</label>
     <label class="chk"><input type="checkbox" id="namePrefix">ファイル名の先頭にキャラ名を付ける</label>
     <label class="chk"><input type="checkbox" id="insAudio">保存時に音声をシーケンスへ配置(再生ヘッド位置・声ごとのトラック)</label>
+    <label class="fld">配置時のクリップ間ギャップ(秒)</label>
+    <div class="row" style="align-items:center; gap:8px;">
+      <input type="range" id="insGapRange" min="0" max="2" step="0.05" style="flex:1;">
+      <input type="number" id="insGap" class="fit" min="0" max="2" step="0.05" style="width:52px; text-align:center;">
+      <span style="flex:0 0 auto; color:var(--muted); font-size:12px;">秒</span>
+    </div>
+    <div class="hint">全行保存で音声を配置する際、クリップとクリップの間隔(秒)。空欄・不正値・負値は0秒(隙間なし)扱い。</div>
 
     <div class="subhead">AquesTalk</div>
     <label class="fld">AquesTalkPlayer.exe のパス</label>
@@ -131,7 +149,7 @@
     </div>
     <div class="btns">
       <button class="primary" id="btnSaveAll">全行を保存</button>
-      <button id="btnDelSaved">使用済みを削除</button>
+      <button id="btnDelSaved">使用済みのセリフを削除</button>
     </div>
     <div class="hint">行の「A」は配置先オーディオトラック(声ごとに記憶)。複数行のテキストを貼り付けると自動で行に分かれます。</div>
   </div>
@@ -141,6 +159,51 @@
     <button id="btnMakeCaptions" style="width:100%">選択した音声クリップから字幕をまとめて生成</button>
     <div class="hint">タイムラインで音声クリップを選択(未選択ならターゲット中のオーディオトラック全体が対象)して実行。各クリップと同名のtxtを読み、実際の位置・長さに合わせた字幕を1本のキャプショントラックとして挿入します。</div>
   </details>
+
+  <div id="vvTuningPanel">
+    <div class="row" style="margin-bottom:8px;">
+      <span style="font-weight:700;">調声: <span id="vvTuningLabel"></span></span>
+    </div>
+    <div class="row" style="margin-bottom:8px;">
+      <input type="text" id="vvTuningPreviewText" style="flex:1;" placeholder="試聴するセリフ">
+    </div>
+    <div class="vtrow">
+      <span class="vtlabel">話速</span>
+      <input type="range" id="vvt_speedScale_range" min="0.50" max="2.00" step="0.01">
+      <input type="number" class="vtnum" id="vvt_speedScale_num" min="0.50" max="2.00" step="0.01">
+    </div>
+    <div class="vtrow">
+      <span class="vtlabel">音高</span>
+      <input type="range" id="vvt_pitchScale_range" min="-0.15" max="0.15" step="0.01">
+      <input type="number" class="vtnum" id="vvt_pitchScale_num" min="-0.15" max="0.15" step="0.01">
+    </div>
+    <div class="vtrow">
+      <span class="vtlabel">抑揚</span>
+      <input type="range" id="vvt_intonationScale_range" min="0.00" max="2.00" step="0.01">
+      <input type="number" class="vtnum" id="vvt_intonationScale_num" min="0.00" max="2.00" step="0.01">
+    </div>
+    <div class="vtrow">
+      <span class="vtlabel">音量</span>
+      <input type="range" id="vvt_volumeScale_range" min="0.00" max="2.00" step="0.01">
+      <input type="number" class="vtnum" id="vvt_volumeScale_num" min="0.00" max="2.00" step="0.01">
+    </div>
+    <div class="vtrow">
+      <span class="vtlabel">開始無音</span>
+      <input type="range" id="vvt_prePhonemeLength_range" min="0.00" max="1.50" step="0.01">
+      <input type="number" class="vtnum" id="vvt_prePhonemeLength_num" min="0.00" max="1.50" step="0.01">
+    </div>
+    <div class="vtrow">
+      <span class="vtlabel">終了無音</span>
+      <input type="range" id="vvt_postPhonemeLength_range" min="0.00" max="1.50" step="0.01">
+      <input type="number" class="vtnum" id="vvt_postPhonemeLength_num" min="0.00" max="1.50" step="0.01">
+    </div>
+    <div class="btns">
+      <button class="primary" id="vvTuningSave">保存</button>
+      <button id="vvTuningPreview">試聴</button>
+      <button id="vvTuningReset">リセット</button>
+      <button id="vvTuningClose">閉じる</button>
+    </div>
+  </div>
 
   <div id="status">準備OK。行にセリフを入力して保存してください。</div>
   <div id="history"></div>
@@ -157,6 +220,8 @@ const $ = id => document.getElementById(id);
 const SETTING_KEY = 'voicedesk_settings_v2';
 const PS_EXE = (process.env.SystemRoot || 'C:\\Windows') + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const AV_VOICE = 'av';
+const SPEECH_NAME_MAX = 20;   // ファイル名に使うセリフ部分の最大文字数
+const MAX_PATH_LEN = 240;     // 保存フルパスの警告閾値(MAX_PATH 260への安全マージン)
 
 const ERR_TABLE = {
   2000:'予期せぬエラー', 2001:'システム辞書(aqdic.bin)が不正', 2002:'ユーザ辞書(aq_user.dic)が不正',
@@ -188,6 +253,10 @@ let trackMap = {};      // voiceId -> track番号
 let engines = [];       // [{name, url, exe}] VOICEVOX互換エンジン
 let vvSpeakerCache = {}; // engineName -> [{id, label}]
 let rowsData = [];      // [{voice, text, saved?}]
+let vvTuning = {};      // voiceId -> {speedScale, pitchScale, ...} 部分オブジェクト
+let favVoices = [];     // voiceId の配列(お気に入り、プルダウン先頭表示)
+const VV_TUNING_KEYS = ['speedScale','pitchScale','intonationScale','volumeScale','prePhonemeLength','postPhonemeLength'];
+const VV_TUNING_DEFAULTS = { speedScale:1.0, pitchScale:0.0, intonationScale:1.0, volumeScale:1.0, prePhonemeLength:0.1, postPhonemeLength:0.1 };
 
 function loadSettings(){
   let s = {};
@@ -205,8 +274,12 @@ function loadSettings(){
   $('makeTxt').checked  = s.makeTxt !== false;
   $('namePrefix').checked = !!s.namePrefix;
   $('insAudio').checked = !!s.insAudio;
+  $('insGap').value = (typeof s.insGap === 'number' && isFinite(s.insGap) && s.insGap >= 0) ? s.insGap : 0;
+  $('insGapRange').value = $('insGap').value;
   trackMap = s.trackMap || {};
   vvSpeakerCache = (s.vvSpeakerCache && !Array.isArray(s.vvSpeakerCache)) ? s.vvSpeakerCache : {};
+  vvTuning = (s.vvTuning && !Array.isArray(s.vvTuning)) ? s.vvTuning : {};
+  favVoices = Array.isArray(s.favVoices) ? s.favVoices : [];
   rowsData = (s.rowsData && s.rowsData.length) ? s.rowsData : [{voice:'', text:''}];
   if(!s.exePath && !s.avExePath && !(s.engines && s.engines.some(e=>e.exe))){
     $('settingsSec').open = true;
@@ -225,18 +298,23 @@ function saveSettings(){
     makeTxt:   $('makeTxt').checked,
     namePrefix:$('namePrefix').checked,
     insAudio:  $('insAudio').checked,
+    insGap:    getInsGap(),
     trackMap:  trackMap,
     vvSpeakerCache: vvSpeakerCache,
+    vvTuning:  vvTuning,
+    favVoices: favVoices,
     rowsData:  rowsData
   };
   localStorage.setItem(SETTING_KEY, JSON.stringify(s));
 }
-['exePath','avExePath','outDir','avOutDir','vvAutoLaunch','txtEnc','makeTxt','namePrefix','insAudio'].forEach(id=>{
+['exePath','avExePath','outDir','avOutDir','vvAutoLaunch','txtEnc','makeTxt','namePrefix','insAudio','insGap','insGapRange'].forEach(id=>{
   $(id).addEventListener('change', ()=>{
     saveSettings();
     if(id==='exePath') reloadVoices();
   });
 });
+$('insGapRange').addEventListener('input', ()=>{ $('insGap').value = $('insGapRange').value; });
+$('insGap').addEventListener('input', ()=>{ $('insGapRange').value = $('insGap').value; });
 
 // ================= 参照ダイアログ =================
 function browse(inputId, chooseDir, exts){
@@ -361,6 +439,30 @@ function buildVoiceList(){
   voiceList.push({id: AV_VOICE, label: '[A.I.VOICE2]'});
 }
 
+function isFavVoice(id){
+  return favVoices.indexOf(id) >= 0;
+}
+function toggleFavVoice(id){
+  const i = favVoices.indexOf(id);
+  if(i >= 0) favVoices.splice(i, 1);
+  else favVoices.push(id);
+  saveSettings();
+  renderRows();
+}
+// voiceList を「お気に入り(favVoices順、現行voiceListに存在するもののみ)」と
+// 「残り(非お気に入り、voiceList本来の順)」に分割する純粋関数。
+// stale(voiceListに存在しない)なfavVoidsエントリはfavグループから除外されるが、
+// favVoices自体は呼び出し側で変更しない(エンジン復帰時に復活させるため)。
+function partitionVoices(list, favs){
+  const favIds = favs || [];
+  const fav = [];
+  favIds.forEach(id=>{
+    const v = list.find(x=>x.id === id);
+    if(v) fav.push(v);
+  });
+  const rest = list.filter(v=>favIds.indexOf(v.id) < 0);
+  return { fav: fav, rest: rest };
+}
 function voiceLabel(voiceId){
   const v = voiceList.find(x=>x.id === voiceId);
   if(v) return v.label.replace(/^\[..\]\s*|^\[A\.I\.VOICE2\]$/g, m=>m.indexOf('A.I.')>=0?'AIVOICE2':'');
@@ -414,7 +516,18 @@ function renderRows(){
 
     const sel = document.createElement('select');
     sel.className = 'rvoice';
-    for(const v of voiceList){
+    const parted = partitionVoices(voiceList, favVoices);
+    if(parted.fav.length){
+      const grp = document.createElement('optgroup');
+      grp.label = '★ お気に入り';
+      for(const v of parted.fav){
+        const op = document.createElement('option');
+        op.value = v.id; op.textContent = v.label;
+        grp.appendChild(op);
+      }
+      sel.appendChild(grp);
+    }
+    for(const v of parted.rest){
       const op = document.createElement('option');
       op.value = v.id; op.textContent = v.label;
       sel.appendChild(op);
@@ -425,6 +538,8 @@ function renderRows(){
     sel.addEventListener('change', ()=>{
       row.voice = sel.value;
       trk.value = trackFor(row.voice);
+      fav.textContent = isFavVoice(row.voice) ? '★' : '☆';
+      tune.disabled = !parseVvVoice(row.voice);
       if(row.saved){ row.saved = false; div.classList.remove('saved'); }
       saveSettings();
     });
@@ -471,10 +586,59 @@ function renderRows(){
     play.title = 'この行を再生';
     play.addEventListener('click', ()=>playRow(row));
 
+    const tune = document.createElement('button');
+    tune.textContent = '⚙️';
+    tune.title = '調声(この声の共通設定・VOICEVOX系のみ)';
+    tune.disabled = !parseVvVoice(row.voice);
+    tune.addEventListener('click', ()=>openVvTuningPanel(row.voice, row.text));
+
+    const fav = document.createElement('button');
+    fav.textContent = isFavVoice(row.voice) ? '★' : '☆';
+    fav.title = 'お気に入り(プルダウン先頭に表示)';
+    fav.addEventListener('click', ()=>toggleFavVoice(row.voice));
+
     const save = document.createElement('button');
     save.textContent = '💾';
     save.title = 'この行を保存';
     save.addEventListener('click', ()=>saveRow(row, div, save));
+
+    txt.addEventListener('keydown', (e)=>{
+      // IME変換中(候補確定のSpace/Enter)は横取りしない
+      if(e.isComposing || e.keyCode === 229) return;
+      // Tab: 行間のセリフ欄フォーカス移動(間のボタン類を飛ばす)
+      if(e.key === 'Tab'){
+        if(e.ctrlKey || e.altKey || e.metaKey) return; // Ctrl+Tab等は横取りしない
+        const inputs = Array.from(document.querySelectorAll('.vrow input.rtext'));
+        const cur = inputs.indexOf(txt);
+        if(e.shiftKey){
+          if(cur > 0){ e.preventDefault(); inputs[cur-1].focus(); }
+          // 先頭行ではpreventDefaultせず標準のTab移動に委ねる
+          return;
+        }
+        e.preventDefault();
+        if(cur >= 0 && cur < inputs.length - 1){
+          inputs[cur+1].focus();
+        } else {
+          // 最終行: btnAddRow相当で新規行を追加してフォーカス
+          const last = rowsData[rowsData.length-1];
+          rowsData.push({voice: last ? last.voice : (voiceList[0]||{}).id || '', text: ''});
+          saveSettings();
+          renderRows();
+          const after = document.querySelectorAll('.vrow input.rtext');
+          if(after.length) after[after.length-1].focus();
+        }
+        return;
+      }
+      if(!e.ctrlKey || e.altKey || e.metaKey) return;
+      if(e.repeat) return;
+      if(e.code === 'Space'){
+        e.preventDefault();
+        playRow(row);
+      } else if(e.key === 'Enter'){
+        e.preventDefault();
+        saveRow(row, div, save);
+      }
+    });
 
     const del = document.createElement('button');
     del.textContent = '×';
@@ -487,7 +651,7 @@ function renderRows(){
       renderRows();
     });
 
-    div.appendChild(sel); div.appendChild(trk); div.appendChild(txt); div.appendChild(play); div.appendChild(save); div.appendChild(del);
+    div.appendChild(sel); div.appendChild(trk); div.appendChild(txt); div.appendChild(play); div.appendChild(tune); div.appendChild(fav); div.appendChild(save); div.appendChild(del);
     box.appendChild(div);
   });
 }
@@ -500,15 +664,118 @@ $('btnAddRow').addEventListener('click', ()=>{
   if(inputs.length) inputs[inputs.length-1].focus();
 });
 
+// ================= VOICEVOX 調声パネル =================
+let vvTuningVoiceId = null;
+
+function vvTuningRangeEl(k){ return $('vvt_' + k + '_range'); }
+function vvTuningNumEl(k){ return $('vvt_' + k + '_num'); }
+
+VV_TUNING_KEYS.forEach(k=>{
+  const r = vvTuningRangeEl(k);
+  const n = vvTuningNumEl(k);
+  r.addEventListener('input', ()=>{ n.value = r.value; });
+  n.addEventListener('input', ()=>{ r.value = n.value; });
+});
+
+function clearSavedForVoice(voiceId){
+  rowsData.forEach(row=>{
+    if(row.voice === voiceId && row.saved) row.saved = false;
+  });
+}
+
+function openVvTuningPanel(voiceId, presetText){
+  if(!parseVvVoice(voiceId)){
+    setStatus('この声は調声に対応していません(VOICEVOX系のみ対応)', 'err');
+    return;
+  }
+  vvTuningVoiceId = voiceId;
+  $('vvTuningLabel').textContent = voiceLabel(voiceId);
+  const cur = Object.assign({}, VV_TUNING_DEFAULTS, vvTuning[voiceId] || {});
+  VV_TUNING_KEYS.forEach(k=>{
+    vvTuningRangeEl(k).value = cur[k];
+    vvTuningNumEl(k).value = cur[k];
+  });
+  $('vvTuningPreviewText').value = (presetText || '').trim() || 'あいうえお、これはテストです。';
+  $('vvTuningPanel').style.display = 'block';
+}
+function closeVvTuningPanel(){
+  $('vvTuningPanel').style.display = 'none';
+  vvTuningVoiceId = null;
+  stopAll(true);
+}
+$('vvTuningSave').addEventListener('click', ()=>{
+  if(!vvTuningVoiceId) return;
+  const t = {};
+  VV_TUNING_KEYS.forEach(k=>{
+    const val = Number(vvTuningNumEl(k).value);
+    if(isFinite(val) && val !== VV_TUNING_DEFAULTS[k]) t[k] = val;
+  });
+  if(Object.keys(t).length) vvTuning[vvTuningVoiceId] = t;
+  else delete vvTuning[vvTuningVoiceId];
+  clearSavedForVoice(vvTuningVoiceId);
+  saveSettings();
+  renderRows();
+  closeVvTuningPanel();
+  setStatus('調声を保存しました', 'ok');
+});
+$('vvTuningReset').addEventListener('click', ()=>{
+  if(!vvTuningVoiceId) return;
+  delete vvTuning[vvTuningVoiceId];
+  VV_TUNING_KEYS.forEach(k=>{
+    vvTuningRangeEl(k).value = VV_TUNING_DEFAULTS[k];
+    vvTuningNumEl(k).value = VV_TUNING_DEFAULTS[k];
+  });
+  clearSavedForVoice(vvTuningVoiceId);
+  saveSettings();
+  renderRows();
+});
+$('vvTuningClose').addEventListener('click', closeVvTuningPanel);
+
+let previewing = false;
+async function previewVvTuning(){
+  if(previewing) return;
+  if(!vvTuningVoiceId) return;
+  const text = ($('vvTuningPreviewText').value || '').trim();
+  if(!text){ setStatus('試聴するテキストを入力してください', 'err'); return; }
+  const liveTuning = {};
+  VV_TUNING_KEYS.forEach(k=>{ liveTuning[k] = Number(vvTuningNumEl(k).value); });
+  stopAll(true);
+  previewing = true;
+  $('vvTuningPreview').disabled = true;
+  try{
+    setStatus('試聴の合成中(VOICEVOX)...', 'run');
+    const tmp = path.join(os.tmpdir(), 'voicedesk_preview.wav');
+    await vvSynthToFile(vvTuningVoiceId, text, tmp, liveTuning);
+    currentAudio = new Audio('file:///' + tmp.replace(/\\/g, '/') + '?' + Date.now());
+    currentAudio.onended = ()=>{ currentAudio = null; setStatus('試聴完了', 'ok'); };
+    setStatus('試聴中(VOICEVOX)...', 'run');
+    await currentAudio.play();
+  }catch(e){
+    setStatus('試聴エラー: ' + e.message, 'err');
+  }finally{
+    previewing = false;
+    $('vvTuningPreview').disabled = false;
+  }
+}
+$('vvTuningPreview').addEventListener('click', previewVvTuning);
+
 // ================= ファイル関連 =================
-function safeFileName(text){
+function safeFileName(text, maxLen){
   let t = String(text).replace(/\r?\n/g, ' ');
   t = t.replace(/[\\\/:*?"<>|]/g, '');
   t = t.replace(/^#>/, '');
   t = t.replace(/\s+/g, '_');
-  if(t.length > 50) t = t.slice(0, 50);
+  const lim = (typeof maxLen === 'number' && maxLen > 0) ? maxLen : 50;
+  if(t.length > lim) t = t.slice(0, lim);
   if(!t) t = 'output';
   return t;
+}
+function pathTooLong(p){
+  return String(p).length > MAX_PATH_LEN;
+}
+function pathLenMsg(p){
+  return 'ファイルパスが長すぎます(' + String(p).length + '文字/上限' + MAX_PATH_LEN + '文字)。\n'
+       + '出力フォルダを浅い場所に変えるか、キャラ名を短くしてください:\n' + p;
 }
 function uniqueWavPath(dir, base){
   let p = path.join(dir, base + '.wav');
@@ -520,7 +787,7 @@ function uniqueWavPath(dir, base){
   return p;
 }
 function wavBaseName(voiceId, text){
-  const base = safeFileName(text);
+  const base = safeFileName(text, SPEECH_NAME_MAX);
   if($('namePrefix').checked){
     const vn = safeFileName(voiceShortName(voiceId));
     if(vn) return vn + '_' + base;
@@ -583,6 +850,10 @@ function wavDurationSec(p){
   }catch(e){}
   return 3;
 }
+function getInsGap(){
+  const v = parseFloat($('insGap').value);
+  return (isFinite(v) && v >= 0) ? v : 0;
+}
 function secToSrt(t){
   const ms = Math.max(0, Math.round(t * 1000));
   const p = (n, w)=>String(n).padStart(w, '0');
@@ -638,6 +909,13 @@ function evalJsx(fn, args){
 async function placeAudio(wavPath, trackNum, offsetSec, binName){
   const r = await evalJsx('placeVoice', [wavPath, trackNum || '1', offsetSec || 0, binName || '']);
   if(String(r).indexOf('ERR:') === 0) return {ok:false, msg:'シーケンス配置エラー: ' + jsxErrMsg(r)};
+  const parts = String(r).split('\t');
+  if(parts.length === 3){
+    const s = parseFloat(parts[1]), e = parseFloat(parts[2]);
+    if(isFinite(s) && isFinite(e)){
+      return {ok:true, msg:'配置OK(A' + (trackNum||'1') + ')', startSec: s, endSec: e};
+    }
+  }
   return {ok:true, msg:'配置OK(A' + (trackNum||'1') + ')'};
 }
 
@@ -707,6 +985,20 @@ async function ensureVvEngine(eng){
   }
   throw new Error(eng.name + ' の起動を確認できませんでした');
 }
+
+// ================= VOICEVOX 調声(合成時の反映) =================
+function applyVvTuning(query, tuning){
+  const out = Object.assign({}, query);   // query が null でも {} を返す
+  if(!tuning) return out;                  // undefined/null/未登録 → 無改変
+  for(const k of VV_TUNING_KEYS){
+    if(Object.prototype.hasOwnProperty.call(tuning, k)){
+      const val = Number(tuning[k]);
+      if(isFinite(val)) out[k] = val;      // 数値化できるキーのみ上書き
+    }
+  }
+  return out;
+}
+
 function parseVvVoice(voiceId){
   const m = String(voiceId).match(/^vv:(.+):(\d+)$/);
   if(!m) return null;
@@ -714,12 +1006,14 @@ function parseVvVoice(voiceId){
   if(!eng) return null;
   return {eng: eng, styleId: m[2]};
 }
-async function vvSynthToFile(voiceId, text, wavPath){
+async function vvSynthToFile(voiceId, text, wavPath, tuningOverride){
   const v = parseVvVoice(voiceId);
   if(!v) throw new Error('エンジンが見つかりません(設定で削除された可能性があります)');
   await ensureVvEngine(v.eng);
   const q = await vvRequest(v.eng, 'POST', '/audio_query?speaker=' + v.styleId + '&text=' + encodeURIComponent(text), null, 30000);
-  const wav = await vvRequest(v.eng, 'POST', '/synthesis?speaker=' + v.styleId, q.toString('utf8'), 120000);
+  const tuning = (tuningOverride !== undefined) ? tuningOverride : vvTuning[voiceId];
+  const query = applyVvTuning(JSON.parse(q.toString('utf8')), tuning);
+  const wav = await vvRequest(v.eng, 'POST', '/synthesis?speaker=' + v.styleId, JSON.stringify(query), 120000);
   fs.writeFileSync(wavPath, wav);
 }
 
@@ -778,22 +1072,24 @@ function pollNewWav(dir, sinceMs, timeoutMs){
 
 // ================= 1行分の保存処理(全行保存・個別保存で共有) =================
 // ctx = {dir, avDir, insAudio, offset}
-// 戻り値: {ok, wavPath, msg, advance}
+// 戻り値: {ok, wavPath, msg, advance, startSec, endSec}
 async function saveOneRow(row, ctx){
   const text = row.text.trim();
   const dir = ctx.dir;
-  const GAP = 0.25;
+  const GAP = getInsGap();
   let wavPath = null;
 
   if(row.voice.indexOf('aq:') === 0){
     const vDir = voiceOutDir(dir, row.voice);
     wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
+    if(pathTooLong(wavPath)){ return {ok:false, msg: pathLenMsg(wavPath)}; }
     const r = await runAques(['/T', text, '/P', row.voice.slice(3), '/W', wavPath]);
     if(r.code === 'noexe'){ return {ok:false, msg:'AquesTalkPlayer.exe が見つかりません(設定を確認)'}; }
     if(r.code !== 0){ return {ok:false, msg:'AquesTalkエラー(' + r.code + '): ' + errMsg(r.code) + '\n' + text}; }
   } else if(row.voice.indexOf('vv:') === 0){
     const vDir = voiceOutDir(dir, row.voice);
     wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
+    if(pathTooLong(wavPath)){ return {ok:false, msg: pathLenMsg(wavPath)}; }
     await vvSynthToFile(row.voice, text, wavPath);
   } else if(row.voice === AV_VOICE){
     const avDir = ctx.avDir;
@@ -808,6 +1104,7 @@ async function saveOneRow(row, ctx){
     if(!rawWavPath){ return {ok:false, msg:'A.I.VOICE2の書き出しを検知できませんでした'}; }
     const avSubDir = voiceOutDir(avDir, AV_VOICE);
     const avDestPath = nextSeqWavPath(avSubDir, wavBaseName(row.voice, text));
+    if(pathTooLong(avDestPath)){ return {ok:false, msg: pathLenMsg(avDestPath)}; }
     try{
       fs.renameSync(rawWavPath, avDestPath);
       wavPath = avDestPath;
@@ -823,12 +1120,15 @@ async function saveOneRow(row, ctx){
     if(!fs.existsSync(txtPath)) await writeTxt(txtPath, text);
   }
   let advance = 0;
+  let startSec, endSec;
   if(ctx.insAudio){
     const p = await placeAudio(wavPath, trackFor(row.voice), ctx.offset || 0, voiceFolderName(row.voice));
     if(!p.ok){ return {ok:false, msg:p.msg}; }
     advance = wavDurationSec(wavPath) + GAP;
+    startSec = p.startSec;
+    endSec = p.endSec;
   }
-  return {ok:true, wavPath: wavPath, msg:'', advance: advance};
+  return {ok:true, wavPath: wavPath, msg:'', advance: advance, startSec: startSec, endSec: endSec};
 }
 
 // ================= 行の再生 =================
@@ -904,7 +1204,10 @@ async function saveRow(row, div, saveBtn){
     saveSettings();
     setStatus('保存しました: ' + path.basename(res.wavPath) + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
   }catch(e){
-    setStatus('エラー: ' + e.message, 'err');
+    const m = (e && e.code === 'ENAMETOOLONG')
+      ? 'ファイルパスが長すぎて保存できませんでした。出力フォルダを浅い場所に変えてください。'
+      : ('エラー: ' + e.message);
+    setStatus(m, 'err');
   }finally{
     saving = false;
     saveBtn.disabled = false;
@@ -926,6 +1229,7 @@ $('btnSaveAll').addEventListener('click', async ()=>{
   const insAudio = $('insAudio').checked;
   const avDir = $('avOutDir').value.trim();
   let offset = 0, ok = 0;
+  let base = null;
   saving = true;
   $('btnSaveAll').disabled = true;
   try{
@@ -936,14 +1240,22 @@ $('btnSaveAll').addEventListener('click', async ()=>{
       const res = await saveOneRow(row, {dir:dir, avDir:avDir, insAudio:insAudio, offset:offset});
       if(!res.ok){ setStatus(res.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
       if(!res.wavPath) continue;
-      offset += res.advance || 0;
+      if(typeof res.startSec === 'number' && typeof res.endSec === 'number'){
+        if(base === null) base = res.startSec;
+        offset = res.endSec - base + getInsGap();
+      } else {
+        offset += res.advance || 0;
+      }
       row.saved = true;
       ok++;
       addHistory(voiceShortName(row.voice) + ' | ' + path.basename(res.wavPath));
     }
     setStatus('保存完了: ' + ok + '件' + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
   }catch(e){
-    setStatus('エラー: ' + e.message + '\n(' + ok + '件保存済み)', 'err');
+    const m = (e && e.code === 'ENAMETOOLONG')
+      ? 'ファイルパスが長すぎて保存できませんでした。出力フォルダを浅い場所に変えてください。'
+      : ('エラー: ' + e.message);
+    setStatus(m + '\n(' + ok + '件保存済み)', 'err');
   }finally{
     saving = false;
     $('btnSaveAll').disabled = false;
@@ -952,23 +1264,25 @@ $('btnSaveAll').addEventListener('click', async ()=>{
   }
 });
 
-// ================= 使用済み行を削除 =================
-function removeSavedRows(rows, defaultVoice){
-  const remaining = rows.filter(r=>!r.saved);
-  if(remaining.length === 0){
-    return [{voice: defaultVoice || '', text: ''}];
-  }
-  return remaining;
+// ================= 使用済みのセリフを削除 =================
+function clearSavedRowsText(rows){
+  return rows.map(r=>{
+    if(!r.saved) return r;
+    const copy = Object.assign({}, r);
+    copy.text = '';
+    copy.saved = false;
+    return copy;
+  });
 }
 
 $('btnDelSaved').addEventListener('click', ()=>{
   const savedCount = rowsData.filter(r=>r.saved).length;
   if(savedCount === 0){ setStatus('保存済みの行がありません'); return; }
-  if(!confirm(savedCount + '件の使用済み行を削除します。よろしいですか?')) return;
-  rowsData = removeSavedRows(rowsData, (voiceList[0]||{}).id || '');
+  if(!confirm(savedCount + '件の使用済みセリフを空にします。声とトラック設定は残ります。よろしいですか?')) return;
+  rowsData = clearSavedRowsText(rowsData);
   saveSettings();
   renderRows();
-  setStatus(savedCount + '件を削除しました', 'ok');
+  setStatus(savedCount + '件のセリフを空にしました', 'ok');
 });
 
 // ================= ツール: 字幕一括生成 =================
@@ -987,7 +1301,9 @@ $('btnMakeCaptions').addEventListener('click', async ()=>{
     const txtPath = mediaPath.replace(/\.[^.\\\/]+$/, '.txt');
     const text = fs.existsSync(txtPath) ? readTxtAuto(txtPath) : null;
     if(text){
-      entries.push({start: parseFloat(parts[1]), end: parseFloat(parts[2]), text: text});
+      let track = parseInt(parts[3], 10);
+      if(isNaN(track)) track = 1;
+      entries.push({start: parseFloat(parts[1]), end: parseFloat(parts[2]), text: text, track: track});
     } else {
       noTxt++;
     }
@@ -996,18 +1312,34 @@ $('btnMakeCaptions').addEventListener('click', async ()=>{
     setStatus('字幕にできるクリップがありません(同名のtxtファイルが見つかりません)', 'err');
     return;
   }
-  entries.sort((a,b)=>a.start - b.start);
+
+  const groups = {};
+  const trackNums = [];
+  for(const e of entries){
+    if(!groups[e.track]){ groups[e.track] = []; trackNums.push(e.track); }
+    groups[e.track].push(e);
+  }
+  trackNums.sort((a,b)=>a - b);
 
   const dir = $('outDir').value.trim() || path.dirname(rows[0].split('\t')[0]);
   const d = new Date();
   const p2 = n=>String(n).padStart(2,'0');
-  const srtPath = path.join(dir, 'captions_' + d.getFullYear() + p2(d.getMonth()+1) + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '.srt');
-  writeSrt(srtPath, entries);
+  const stamp = d.getFullYear() + p2(d.getMonth()+1) + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
 
   setStatus('字幕トラックを挿入中...', 'run');
-  const r2 = await evalJsx('insertCaption', [srtPath]);
-  if(String(r2).indexOf('ERR:') === 0){ setStatus(jsxErrMsg(r2), 'err'); return; }
-  let msg = '字幕を生成しました: ' + entries.length + '件を1トラックに挿入';
+  let doneTracks = 0;
+  for(const t of trackNums){
+    const groupEntries = groups[t].slice().sort((a,b)=>a.start - b.start);
+    const srtPath = path.join(dir, 'captions_' + stamp + '_track' + t + '.srt');
+    writeSrt(srtPath, groupEntries);
+    const r2 = await evalJsx('insertCaption', [srtPath]);
+    if(String(r2).indexOf('ERR:') === 0){
+      setStatus(jsxErrMsg(r2) + '\n(' + doneTracks + '/' + trackNums.length + 'トラック完了時点で中断)', 'err');
+      return;
+    }
+    doneTracks++;
+  }
+  let msg = '字幕を生成しました: ' + entries.length + '件を' + trackNums.length + 'トラックに分割挿入';
   if(noTxt > 0) msg += '\n(txtが見つからず ' + noTxt + ' クリップをスキップ)';
   setStatus(msg, 'ok');
 });

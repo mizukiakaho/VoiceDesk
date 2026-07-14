@@ -39,6 +39,21 @@ test('safeFileName: 結果が空文字列になる場合は "output" になる',
   assert.equal(api.safeFileName('///***'), 'output');
 });
 
+test('safeFileName: 第2引数maxLenを指定すると指定文字数で切り詰める', () => {
+  const api = loadIndex();
+  const longText = 'a'.repeat(30);
+  const result = api.safeFileName(longText, 20);
+  assert.equal(result.length, 20);
+  assert.equal(result, 'a'.repeat(20));
+});
+
+test('safeFileName: 第2引数省略時は従来どおり50文字上限のまま', () => {
+  const api = loadIndex();
+  const longText = 'a'.repeat(60);
+  assert.equal(api.safeFileName(longText).length, 50);
+  assert.equal(api.safeFileName(longText, undefined).length, 50);
+});
+
 test('uniqueWavPath: 衝突が無ければ base.wav をそのまま返す', (t) => {
   const api = loadIndex();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voicedesk-uniq-'));
@@ -124,4 +139,40 @@ test('wavBaseName: namePrefix設定ONならキャラ名_セリフになる', () 
   api.setEl('namePrefix', { checked: true });
   api.__setState({ voiceList: [{ id: 'av', label: '[A.I.VOICE2]' }] });
   assert.equal(api.wavBaseName('av', 'こんにちは'), 'AIVOICE2_こんにちは');
+});
+
+test('wavBaseName: namePrefix設定OFFなら長いセリフは20文字(SPEECH_NAME_MAX)に切り詰められる', () => {
+  const api = loadIndex();
+  api.setEl('namePrefix', { checked: false });
+  const longText = 'あ'.repeat(30);
+  const result = api.wavBaseName('av', longText);
+  assert.equal(result.length, 20);
+  assert.equal(result, 'あ'.repeat(20));
+});
+
+test('wavBaseName: namePrefix設定ONでもキャラ名prefixは50文字上限のまま、セリフ部分は20文字', () => {
+  const api = loadIndex();
+  api.setEl('namePrefix', { checked: true });
+  api.__setState({ voiceList: [{ id: 'av', label: '[A.I.VOICE2]' }] });
+  const longText = 'あ'.repeat(30);
+  const result = api.wavBaseName('av', longText);
+  assert.equal(result, 'AIVOICE2_' + 'あ'.repeat(20));
+});
+
+test('pathTooLong: MAX_PATH_LEN文字ちょうどはfalse、+1文字はtrue', () => {
+  const api = loadIndex();
+  const exact = 'a'.repeat(240);
+  const over = 'a'.repeat(241);
+  assert.equal(api.pathTooLong(exact), false);
+  assert.equal(api.pathTooLong(over), true);
+});
+
+test('pathLenMsg: 文字数と上限を含む日本語メッセージを返す', () => {
+  const api = loadIndex();
+  const p = 'a'.repeat(241);
+  const msg = api.pathLenMsg(p);
+  assert.match(msg, /ファイルパスが長すぎます/);
+  assert.match(msg, /241文字/);
+  assert.match(msg, /上限240文字/);
+  assert.match(msg, new RegExp(p));
 });

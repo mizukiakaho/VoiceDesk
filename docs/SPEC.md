@@ -1,6 +1,6 @@
 # VoiceDesk 仕様書(開発者向け)
 
-バージョン: 1.1.0 / ライセンス: MIT
+バージョン: 1.2.0 / ライセンス: MIT
 
 ## 1. 概要
 
@@ -45,14 +45,31 @@ voicedesk/
   "engines":   [{"name":"VOICEVOX","url":"http://127.0.0.1:50021","exe":"run.exeパス"}],
   "vvAutoLaunch": true,
   "txtEnc": "sjis|utf8",
-  "makeTxt": true, "namePrefix": false, "insAudio": false,
+  "makeTxt": true, "namePrefix": false, "insAudio": false, "insGap": 0,
   "trackMap": {"voiceId": "トラック番号"},
   "vvSpeakerCache": {"エンジン名": [{"id":3,"label":"ずんだもん(ノーマル)"}]},
+  "vvTuning": {"vv:VOICEVOX:3": {"speedScale":1.2, "intonationScale":1.1}},
+  "favVoices": ["vv:VOICEVOX:3", "aq:れいむ"],
   "rowsData": [{"voice":"voiceId","text":"セリフ","saved":true}]
 }
 ```
 - `saved`(任意)は個別保存/全行保存で書き出し済みになった行に付く。声・セリフを編集すると
   解除される。localStorageに永続化されるためパネル再起動後も保持される
+- `insGap`(任意、既定0)は全行保存で音声をシーケンスへ配置する際のクリップ間ギャップ(秒)。
+  `saveOneRow`内で`advance = 音声長 + insGap`としてオフセットに使われる。空欄・不正値・負値は
+  0(隙間なし)にフォールバックする。個別保存(`offset:0`単発配置)には実質影響しない。
+  未指定の旧設定も0として扱われる
+- `vvTuning`(任意)はVOICEVOX系の話者(voiceId)ごとの調声設定。標準6項目
+  (`speedScale`/`pitchScale`/`intonationScale`/`volumeScale`/`prePhonemeLength`/`postPhonemeLength`)
+  のうち既定値と異なるキーのみを部分オブジェクトとして格納する。`saved`と同様、
+  調声パネルで保存・リセットすると、当該voiceIdを使用している行の`saved`は解除される
+  (`clearSavedForVoice`)
+- `favVoices`(任意)はお気に入り登録した声のvoiceId配列。登録順がそのままプルダウンの
+  「★ お気に入り」グループ内の表示順になる。各行の☆/★ボタン(`toggleFavVoice`)で追加・解除する。
+  未指定/旧設定の場合は空配列扱いとなり、お気に入りグループ自体が表示されず従来どおりの
+  フラットな声リストになる。エンジン削除等で該当voiceIdが現行の声リストに存在しなくなった
+  場合も、`favVoices`からは削除されず(表示上スキップされるのみ)、エンジンが復帰すれば
+  再びお気に入りとして表示される(`partitionVoices`)
 
 ### voiceId 形式
 - `aq:<プリセット名>` … AquesTalk (例 `aq:れいむ`)
@@ -73,6 +90,10 @@ voicedesk/
 - `POST /synthesis?speaker=<id>` (body=クエリJSON) … WAVバイナリ
 - 既定ポート: VOICEVOX 50021 / AivisSpeech 10101 / SHAREVOX 50025
 - fetchはCORSの都合でNodeの http.request を使用(vvRequest関数)
+- `/audio_query`取得後・`/synthesis`送信前に、`vvTuning[voiceId]`があれば
+  `applyVvTuning(query, vvTuning[voiceId])`でクエリJSONへ反映する(`vvSynthToFile`内)。
+  対象は標準6項目のみで、それ以外のフィールド(`accent_phrases`等)や未登録voiceIdの
+  クエリは無改変で通過する
 
 ### A.I.VOICE2 (bridge/aivoice2_bridge.ps1)
 公式APIが無いためUIAutomationで操作。
@@ -91,9 +112,15 @@ voicedesk/
 - `getVoiceSubBin(subName)` … VoiceDeskビン直下のsubName名サブビンを取得、無ければ作成。
   subNameが空ならVoiceDeskビン自体を返す
 - `getSelectedAudioClips()` … 選択中(無ければターゲットトラック全)音声クリップの
-  `mediaPath\tstart\tend` 一覧を返す
+  `mediaPath\tstart\tend\ttrackIndex` 一覧を返す(trackIndexは1-based、`placeVoice`の
+  `audioTrack`引数と同じ慣習)。実装は`seq.getSelection()`を使わず`seq.audioTracks`を
+  インデックス順にループし、各クリップの`clip.isSelected()`で選択判定する方式
+  (選択クリップから所属トラック番号を逆引きする公式APIが無いため)
 - `insertCaption(srtPath)` … SRTをインポートし createCaptionTrack(item, 0)(VoiceDeskビン直下、
-  サブビン分けの対象外)
+  サブビン分けの対象外)。字幕生成は常にトラック毎に分割される設計で、index.html側が
+  ターゲットトラック(またはトラック番号)ごとにSRTを分けてこの関数を複数回呼ぶ。
+  1回の呼び出し=1キャプショントラックという不変条件は変わらない。
+  createCaptionTrackはトラック名を指定できない
 - 戻り値規約: `OK:...` / `ERR:<コード>`。コードは index.html の JSX_ERR で日本語化
 
 ### 保存時のフォルダ構成・連番仕様(index.html)
@@ -108,8 +135,23 @@ voicedesk/
   既存ファイルから`^(\d+)_`最大値を走査し+1、3桁ゼロ埋めして採番。フォルダ内のみで
   独立カウントし、既存ファイルは上書きしない)。`namePrefix`設定ONの場合はセリフ部分の前に
   キャラ名(`wavBaseName`)が付く。衝突時は`uniqueWavPath`で`_1`等のサフィックスを追加
+  - ファイル名中の**セリフ本体**は`safeFileName(text, SPEECH_NAME_MAX)`により
+    `SPEECH_NAME_MAX`(20)文字に切り詰められる。**キャラ名prefix**
+    (`namePrefix`ON時、`voiceShortName`の結果に対する`safeFileName`)は引数省略のため
+    従来どおり50文字上限のまま。**フォルダ名**(`voiceFolderName`)も引数省略で50文字上限の
+    まま変更なし。用途によって`safeFileName`の第2引数`maxLen`(省略時50)で上限が異なる点に注意
+- パス長ガード: 保存フルパス(`wavPath`/A.I.VOICE2の`avDestPath`)が`MAX_PATH_LEN`(240、
+  Windowsの`MAX_PATH`260への安全マージン)を超える場合、`pathTooLong()`が`saveOneRow`内で
+  合成・書き出し呼び出しの直前に検知し、`pathLenMsg()`のメッセージで保存処理そのものを
+  中断する(合成は実行されない)。加えて、事前チェックをすり抜けたOS側の`ENAMETOOLONG`
+  エラーは`saveRow`/`btnSaveAll`の`catch`で日本語メッセージに変換して表示する
 - txtは最終的なWAVパスと同じフォルダ・同じベース名で生成される(字幕生成が前提とする
   「WAVと同名txt」を維持)
+- 字幕一括生成(`btnMakeCaptions`)は`getSelectedAudioClips()`が返すtrackIndexで
+  クリップをグルーピングし、トラック番号ごとに個別のSRTファイル
+  `captions_<timestamp>_track<N>.srt`(`<timestamp>`は全トラック共通の生成時刻)を
+  `outDir`(未設定時は先頭クリップのフォルダ)に書き出して`insertCaption`をトラック数分
+  呼び出す。UI上のオプション(チェックボックス等)は無く、常にトラック毎に分割する
 - A.I.VOICE2は`voiceId`が常に`av`のみで話者を判別できないため専用フォルダ
   `avOutDir/AIVOICE2/`に統一。`pollNewWav`によるWAV検知は従来通り`avOutDir`直下のみを
   監視(サブフォルダは監視対象外)し、検知後に`fs.renameSync`で
@@ -120,10 +162,10 @@ voicedesk/
   `{ok, wavPath, msg, advance}`)に集約されており、全行保存(`btnSaveAll`)と行ごとの
   個別保存(`saveRow`、💾ボタン)の両方から呼ばれる。連番・フォルダ構成・txt生成・
   A.I.VOICE2のrename処理はこの関数に一元化されている
-- 保存に成功した行は`row.saved=true`になり、グレー表示される。「使用済みを削除」
-  (`btnDelSaved`)は`saved`が立った行だけを一括削除する(全削除になる場合は空行を1つ残す)。
-  この一括削除の配列操作は純粋関数`removeSavedRows(rows, defaultVoice)`に切り出されており、
-  `node --test`でテスト対象になっている
+- 保存に成功した行は`row.saved=true`になり、グレー表示される。「使用済みのセリフを削除」
+  (`btnDelSaved`)は`saved`が立った行のセリフ(text)を空にし`saved`を解除する(行自体・声・
+  トラック設定は残る。行が削除されるわけではない)。この配列操作は純粋関数
+  `clearSavedRowsText(rows)`に切り出されており、`node --test`でテスト対象になっている
 
 ## 6. 重要な実装上の注意(ハマりどころ)
 
@@ -138,7 +180,10 @@ voicedesk/
 6. txtのShift-JIS書き込みはNodeでは不可のためPowerShell経由
    (テキストは環境変数渡しで文字化け回避)
 7. キャプションは createCaptionTrack 1回=1トラック。まとめて1つのSRTにしてから
-   1回で挿入する設計にしている(都度挿入はトラックが乱立するため廃止済み)
+   1回で挿入する設計にしている(都度挿入はトラックが乱立するため廃止済み)。
+   ただし字幕一括生成は常にターゲットトラック(音声トラック)単位で分割しており、
+   これは音声トラック数分(通常数本)のSRT・挿入呼び出しに留まるため乱立しない。
+   クリップ単位(数十〜数百件)での都度挿入は引き続き禁止
 
 ## 7. ビルド・テスト
 
