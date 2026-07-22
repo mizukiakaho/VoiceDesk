@@ -76,6 +76,20 @@
   #vvTuningPanel .vtlabel{flex:0 0 74px; color:var(--muted); font-size:11px;}
   #vvTuningPanel input[type=range]{flex:1;}
   #vvTuningPanel input.vtnum{width:56px; flex:0 0 auto; text-align:center; padding:6px 2px;}
+  /* 確認モーダル */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200;
+    align-items:center; justify-content:center;
+  }
+  .modal-overlay.show{display:flex;}
+  .modal{
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    padding:14px; box-shadow:0 4px 16px rgba(0,0,0,.5); width:min(320px, 90vw);
+  }
+  .modal-title{font-weight:700; font-size:13px; margin-bottom:8px;}
+  .modal-body{font-size:12px; color:var(--text); white-space:pre-wrap; margin-bottom:12px;}
+  .modal-btns{display:flex; gap:6px; justify-content:flex-end;}
+  .modal-btns button{flex:0 0 auto;}
 </style>
 </head>
 <body>
@@ -202,6 +216,17 @@
       <button id="vvTuningPreview">試聴</button>
       <button id="vvTuningReset">リセット</button>
       <button id="vvTuningClose">閉じる</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="confirmOverlay">
+    <div class="modal">
+      <div class="modal-title" id="confirmTitle"></div>
+      <div class="modal-body" id="confirmBody"></div>
+      <div class="modal-btns">
+        <button id="confirmCancel">キャンセル</button>
+        <button class="stop" id="confirmOk">OK</button>
+      </div>
     </div>
   </div>
 
@@ -922,6 +947,7 @@ async function placeAudio(wavPath, trackNum, offsetSec, binName){
 // ================= AquesTalk =================
 let currentProc = null;
 let currentAudio = null;
+let playGen = 0;
 function runAques(args){
   return new Promise((resolve)=>{
     const exe = $('exePath').value.trim();
@@ -1135,6 +1161,7 @@ async function saveOneRow(row, ctx){
 async function playRow(row){
   const text = (row.text||'').trim();
   if(!text){ setStatus('セリフを入力してください', 'err'); return; }
+  const myGen = ++playGen;
   stopAll(true);
   try{
     if(row.voice.indexOf('aq:') === 0){
@@ -1148,8 +1175,12 @@ async function playRow(row){
       setStatus('合成中(VOICEVOX)...', 'run');
       const tmp = path.join(os.tmpdir(), 'voicedesk_preview.wav');
       await vvSynthToFile(row.voice, text, tmp);
+      if(myGen !== playGen) return;
       currentAudio = new Audio('file:///' + tmp.replace(/\\/g, '/') + '?' + Date.now());
-      currentAudio.onended = ()=>{ currentAudio = null; setStatus('再生完了', 'ok'); };
+      currentAudio.onended = ()=>{
+        if(myGen !== playGen) return;
+        currentAudio = null; setStatus('再生完了', 'ok');
+      };
       setStatus('再生中(VOICEVOX)...', 'run');
       await currentAudio.play();
     } else if(row.voice === AV_VOICE){
@@ -1264,6 +1295,38 @@ $('btnSaveAll').addEventListener('click', async ()=>{
   }
 });
 
+// ================= 確認モーダル =================
+function showConfirm(title, message){
+  return new Promise(resolve=>{
+    const overlay = $('confirmOverlay');
+    const okBtn = $('confirmOk');
+    const cancelBtn = $('confirmCancel');
+    $('confirmTitle').textContent = title;
+    $('confirmBody').textContent = message;
+
+    function cleanup(result){
+      overlay.classList.remove('show');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onOverlay);
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    }
+    function onOk(){ cleanup(true); }
+    function onCancel(){ cleanup(false); }
+    function onOverlay(e){ if(e.target === overlay) cleanup(false); }
+    function onKeydown(e){ if(e.key === 'Escape') cleanup(false); }
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onOverlay);
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.classList.add('show');
+    cancelBtn.focus();
+  });
+}
+
 // ================= 使用済みのセリフを削除 =================
 function clearSavedRowsText(rows){
   return rows.map(r=>{
@@ -1275,10 +1338,11 @@ function clearSavedRowsText(rows){
   });
 }
 
-$('btnDelSaved').addEventListener('click', ()=>{
+$('btnDelSaved').addEventListener('click', async ()=>{
   const savedCount = rowsData.filter(r=>r.saved).length;
   if(savedCount === 0){ setStatus('保存済みの行がありません'); return; }
-  if(!confirm(savedCount + '件の使用済みセリフを空にします。声とトラック設定は残ります。よろしいですか?')) return;
+  const ok = await showConfirm('使用済みのセリフを削除', savedCount + '件の使用済みセリフを空にします。声とトラック設定は残ります。よろしいですか?');
+  if(!ok) return;
   rowsData = clearSavedRowsText(rowsData);
   saveSettings();
   renderRows();
