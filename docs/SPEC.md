@@ -34,7 +34,16 @@ voicedesk/
 - PowerShellはPATHに無い環境があるため必ずフルパス
   `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` で呼ぶ(定数 PS_EXE)
 
-## 4. データ構造(localStorage: key `voicedesk_settings_v2`)
+## 4. データ構造
+
+設定は「共通ファイル(`%APPDATA%\VoiceDesk\settings.json`)」と「パネルのlocalStorage
+(`voicedesk_rows_v1`)」の2箇所に分かれている(旧バージョンではlocalStorageのキー
+`voicedesk_settings_v2`に全て格納していたが、v1.3.0で分割した)。
+
+### 4-1. 共通設定ファイル(`%APPDATA%\VoiceDesk\settings.json`)
+
+WAV出力先・各エンジンのパス・トラック割当・お気に入り等、Premiereプロジェクトに依存しない
+「マシン単位の設定」を格納する。JSON、UTF-8(BOM無し)、インデント2。
 
 ```json
 {
@@ -49,12 +58,18 @@ voicedesk/
   "trackMap": {"voiceId": "トラック番号"},
   "vvSpeakerCache": {"エンジン名": [{"id":3,"label":"ずんだもん(ノーマル)"}]},
   "vvTuning": {"vv:VOICEVOX:3": {"speedScale":1.2, "intonationScale":1.1}},
-  "favVoices": ["vv:VOICEVOX:3", "aq:れいむ"],
-  "rowsData": [{"voice":"voiceId","text":"セリフ","saved":true}]
+  "favVoices": ["vv:VOICEVOX:3", "aq:れいむ"]
 }
 ```
-- `saved`(任意)は個別保存/全行保存で書き出し済みになった行に付く。声・セリフを編集すると
-  解除される。localStorageに永続化されるためパネル再起動後も保持される
+- 保存先パスは固定(`globalSettingsPath()`、`path.join(process.env.APPDATA || os.homedir(),
+  'VoiceDesk', 'settings.json')`)で、UIから変更はできない。設定欄末尾に読み取り専用表示のみ行う
+  (`#settingsPathLabel`)。パス項目自体ではないため参照ボタンは付けない
+- 書き込みは`writeGlobalSettings()`が担当し、`fs.writeFileSync(tmp)`→`fs.renameSync(tmp, path)`の
+  アトミック書き込みを行う(`settings.json.tmp`経由)。直前に書き込んだ内容とJSON文字列が同一なら
+  何もしない(`change`イベント毎の無駄な書き込み抑止)
+- 書き込みに失敗した場合(フォルダ作成不可等)は、パネル内動作を止めないよう旧キー
+  `voicedesk_settings_v2`(localStorage)へフォールバック保存し、その起動中は1回だけ
+  ステータス欄にエラーを表示する
 - `insGap`(任意、既定0)は全行保存で音声をシーケンスへ配置する際のクリップ間ギャップ(秒)。
   `saveOneRow`内で`advance = 音声長 + insGap`としてオフセットに使われる。空欄・不正値・負値は
   0(隙間なし)にフォールバックする。個別保存(`offset:0`単発配置)には実質影響しない。
@@ -70,6 +85,38 @@ voicedesk/
   フラットな声リストになる。エンジン削除等で該当voiceIdが現行の声リストに存在しなくなった
   場合も、`favVoices`からは削除されず(表示上スキップされるのみ)、エンジンが復帰すれば
   再びお気に入りとして表示される(`partitionVoices`)
+
+### 4-2. パネルのlocalStorage(key `voicedesk_rows_v1`)
+
+台本(行データ)のみを格納する。CEPパネルのストレージ区画単位(現状は真のプロジェクト単位
+ではない)。
+
+```json
+{
+  "rowsData": [{"voice":"voiceId","text":"セリフ","saved":true}]
+}
+```
+- `saved`(任意)は個別保存/全行保存で書き出し済みになった行に付く。声・セリフを編集すると
+  解除される。localStorageに永続化されるためパネル再起動後も保持される
+
+### 4-3. 旧形式からの移行
+
+旧バージョン(〜v1.2.x)はlocalStorageの`voicedesk_settings_v2`に全設定(`rowsData`含む)を
+1つのJSONとして保存していた。`loadSettings()`は起動時に以下の順で解決する。
+1. 共通ファイル(`%APPDATA%\VoiceDesk\settings.json`)が読めればそれを使う
+2. 読めない(未作成/壊れている)場合、旧キー`voicedesk_settings_v2`があれば
+   `pickGlobalSettings()`で共通設定15キーのみを抽出して初期値にし、その場で
+   `saveSettings()`を呼んで共通ファイルへ書き出す(移行完了、ステータス欄に通知)。
+   `engines`配列を持たないさらに古い形式のために、`vvUrl`/`vvExePath`もこの移行時のみ
+   一時的に引き継ぎ、直後の`engines`既定値生成(`engines[0].url`/`engines[0].exe`)に
+   反映してから保存する(この2キー自体は`GLOBAL_KEYS`に含まれないため共通ファイルには
+   書き出されない)
+3. どちらも無ければ空の設定として起動する(初回起動)
+
+台本(`rowsData`)は共通ファイルの読み込み有無に関わらず、`voicedesk_rows_v1`
+(無ければ旧`voicedesk_settings_v2`内の`rowsData`)から独立して読み込む。
+旧キー`voicedesk_settings_v2`自体は削除しない(過去バージョンに戻した場合の読み込み元、
+および共通ファイル書き込み失敗時のフォールバック先として残す)。
 
 ### voiceId 形式
 - `aq:<プリセット名>` … AquesTalk (例 `aq:れいむ`)

@@ -148,6 +148,7 @@
     </div>
 
     <div class="hint">設定は自動保存されます。</div>
+    <div class="hint">設定ファイル: <span id="settingsPathLabel" style="word-break:break-all;"></span></div>
   </details>
 
   <div class="sec">
@@ -283,9 +284,88 @@ let favVoices = [];     // voiceId の配列(お気に入り、プルダウン�
 const VV_TUNING_KEYS = ['speedScale','pitchScale','intonationScale','volumeScale','prePhonemeLength','postPhonemeLength'];
 const VV_TUNING_DEFAULTS = { speedScale:1.0, pitchScale:0.0, intonationScale:1.0, volumeScale:1.0, prePhonemeLength:0.1, postPhonemeLength:0.1 };
 
+const ROWS_KEY = 'voicedesk_rows_v1';   // localStorage: 台本(rowsData)のみ
+// SETTING_KEY(voicedesk_settings_v2)は「旧形式の移行元 / 書き込み失敗時のフォールバック先」として残す
+const GLOBAL_KEYS = ['exePath','avExePath','outDir','avOutDir','engines','vvAutoLaunch',
+                      'txtEnc','makeTxt','namePrefix','insAudio','insGap',
+                      'trackMap','vvSpeakerCache','vvTuning','favVoices'];
+
+function globalSettingsDir(){
+  return path.join(process.env.APPDATA || os.homedir(), 'VoiceDesk');
+}
+function globalSettingsPath(){
+  return path.join(globalSettingsDir(), 'settings.json');
+}
+// 純粋関数: s から GLOBAL_KEYS のうち存在するキーだけを抜いた新オブジェクトを返す(rowsData等は落とす)
+function pickGlobalSettings(s){
+  const out = {};
+  GLOBAL_KEYS.forEach(function(k){
+    if(s && Object.prototype.hasOwnProperty.call(s, k) && s[k] !== undefined) out[k] = s[k];
+  });
+  return out;
+}
+function readGlobalSettings(){
+  try{
+    const txt = fs.readFileSync(globalSettingsPath(), 'utf8');
+    const obj = JSON.parse(txt);
+    if(obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+  }catch(e){}
+  return null;
+}
+let lastGlobalJson = null;
+let globalWriteWarned = false;
+function writeGlobalSettings(s){
+  const json = JSON.stringify(s, null, 2);
+  if(json === lastGlobalJson) return true;
+  try{
+    const dir = globalSettingsDir();
+    fs.mkdirSync(dir, {recursive:true});
+    const target = globalSettingsPath();
+    const tmp = target + '.tmp';
+    fs.writeFileSync(tmp, json, 'utf8');
+    fs.renameSync(tmp, target);
+    lastGlobalJson = json;
+    globalWriteWarned = false;
+    return true;
+  }catch(e){
+    // 書き込みに失敗した場合は旧キー(SETTING_KEY)へフォールバックして設定を失わないようにする
+    try{ localStorage.setItem(SETTING_KEY, JSON.stringify(Object.assign({}, s, {rowsData: rowsData}))); }catch(e2){}
+    if(!globalWriteWarned){
+      globalWriteWarned = true;
+      if(typeof setStatus === 'function'){
+        setStatus('設定ファイルに保存できませんでした(' + e.message + ')。この起動中はパネル内保存にフォールバックします', 'err');
+      }
+    }
+    return false;
+  }
+}
+function readRowsData(){
+  try{
+    const obj = JSON.parse(localStorage.getItem(ROWS_KEY));
+    if(obj && Array.isArray(obj.rowsData)) return obj.rowsData;
+  }catch(e){}
+  return null;
+}
+function writeRowsData(rows){
+  localStorage.setItem(ROWS_KEY, JSON.stringify({rowsData: rows}));
+}
+
 function loadSettings(){
-  let s = {};
-  try{ s = JSON.parse(localStorage.getItem(SETTING_KEY)) || {}; }catch(e){}
+  const g0 = readGlobalSettings();
+  let legacy = null;
+  try{ legacy = JSON.parse(localStorage.getItem(SETTING_KEY)) || null; }catch(e){}
+  let migrated = false;
+  let s = g0;
+  if(!s){
+    s = legacy ? pickGlobalSettings(legacy) : {};
+    if(legacy){
+      // engines配列を持たない旧形式(〜v1.2.x)向けの互換キー。GLOBAL_KEYS/pickGlobalSettingsには
+      // 含めない(共通ファイルへ永続化はしない)が、移行の瞬間だけ引き継いでengines[0]に反映する。
+      if(legacy.vvUrl !== undefined)     s.vvUrl = legacy.vvUrl;
+      if(legacy.vvExePath !== undefined) s.vvExePath = legacy.vvExePath;
+    }
+    migrated = !!legacy;
+  }
   $('exePath').value    = s.exePath    || '';
   $('avExePath').value  = s.avExePath  || '';
   $('outDir').value     = s.outDir     || '';
@@ -305,8 +385,13 @@ function loadSettings(){
   vvSpeakerCache = (s.vvSpeakerCache && !Array.isArray(s.vvSpeakerCache)) ? s.vvSpeakerCache : {};
   vvTuning = (s.vvTuning && !Array.isArray(s.vvTuning)) ? s.vvTuning : {};
   favVoices = Array.isArray(s.favVoices) ? s.favVoices : [];
-  rowsData = (s.rowsData && s.rowsData.length) ? s.rowsData : [{voice:'', text:''}];
-  if(!s.exePath && !s.avExePath && !(s.engines && s.engines.some(e=>e.exe))){
+  const rows = readRowsData() || (legacy && legacy.rowsData) || null;
+  rowsData = (rows && rows.length) ? rows : [{voice:'', text:''}];
+  if($('settingsPathLabel')) $('settingsPathLabel').textContent = globalSettingsPath();
+  if(migrated){
+    saveSettings();
+    setTimeout(()=>setStatus('以前の設定を ' + globalSettingsPath() + ' に移行しました'), 0);
+  } else if(!s.exePath && !s.avExePath && !(s.engines && s.engines.some(e=>e.exe))){
     $('settingsSec').open = true;
     setTimeout(()=>setStatus('初回設定: 設定欄で使用する音声合成ソフトのパスと出力フォルダを設定してください(使うものだけでOK)'), 0);
   }
@@ -327,10 +412,10 @@ function saveSettings(){
     trackMap:  trackMap,
     vvSpeakerCache: vvSpeakerCache,
     vvTuning:  vvTuning,
-    favVoices: favVoices,
-    rowsData:  rowsData
+    favVoices: favVoices
   };
-  localStorage.setItem(SETTING_KEY, JSON.stringify(s));
+  writeGlobalSettings(s);
+  writeRowsData(rowsData);
 }
 ['exePath','avExePath','outDir','avOutDir','vvAutoLaunch','txtEnc','makeTxt','namePrefix','insAudio','insGap','insGapRange'].forEach(id=>{
   $(id).addEventListener('change', ()=>{
