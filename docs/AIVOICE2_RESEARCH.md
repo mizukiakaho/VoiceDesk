@@ -54,7 +54,7 @@
 ```json
 "saveWave": {
   "format": "wav-16-48000",            // wav-16-{8000..48000}
-  "exportAllAction": "combine",        // 一括書き出し: "combine"=1ファイルに結合。ブロック毎に出す方の値は未確認(要確認)
+  "exportAllAction": "combine",        // 一括書き出し: "combine"=1ファイルに結合 / "textblock"=ブロック毎(4章で確認)
   "saveText": true,                    // テキストファイルを音声と一緒に保存
   "textEncoding": "UTF-8",             // UTF-8 | CP932
   "saveLab": false,
@@ -74,7 +74,7 @@
   wav+txt が生成できることを実機確認**(`imkana`/`tuning` は省略可。読みは開いた時に再生成される)。
   - 検証: 3ブロック(通常/呆れ/喜び)の最小 JSON → ファイル→プロジェクトを開く → 3ブロック表示 → 書き出し →
     `block1.wav`(48kHz/16bit/mono、1.52秒)+ `block1.txt`(UTF-8、BOM無し、本文1行)
-- 関連付けにより `aivoice.exe <path>.aieprojx` で起動時に開ける(起動中インスタンスへの引き渡し可否は未確認)。
+- 関連付けにより `aivoice.exe <path>.aieprojx` で起動時に開ける(起動中のインスタンスには渡らない。4章参照)。
 
 ### 2-4. UIAutomation まわりの実測(ハマりどころ)
 1. **Flutter のアクセシビリティツリーは「最初の問い合わせ→数百ms待つ」まで空**。しかも同一 PowerShell プロセス内で
@@ -129,13 +129,44 @@ VoiceDesk(index.html)
 
 ### 推奨: 案A(+案Bのうち「前面復帰」「fs.watch」は共通で入れる)
 
-## 4. 未確定・要確認事項(ユーザー判断が必要なもの)
-1. `exportAllAction` の「ブロック毎」を表す JSON 値(UI で切り替えて `app_settings.json` を読めば分かる。A.I.VOICE2 の設定を
-   一時的に変更する必要がある)。
-2. 命名規則モードで「一括書き出し」を押した時にフォルダ選択ダイアログが出るか(`namingRule.directory` が効くか)。
-3. `aivoice.exe <proj>` を起動中に実行した場合の挙動(既存インスタンスで開く / 2重起動 / 無視)。
-4. A.I.VOICE2 に未保存の変更があるときの確認ダイアログの文言とボタン名(自動で「保存しない」は押さない方針)。
-5. VoiceDesk が `app_settings.json` を書き換える(自動設定)ことを許容するか、案内表示にとどめるか。
+## 4. 実測で確定した事項(当初の未確定事項の結果)
+
+1. `exportAllAction` の値: `"textblock"`(テキストブロックごと) / `"combine"`(1ファイルに結合)。
+   `filePathSelectionMode` の値: `"dialog"` / `"namingRule"`(A.I.VOICE2 の設定画面で切り替えて `app_settings.json` を読んで確認)。
+2. 命名規則モードの「一括書き出し」は Win32 のフォルダ選択ダイアログではなく、**Flutter 内の確認ダイアログ
+   「一括書き出し(命名規則)」**(保存先フォルダ欄・命名規則欄・「書き出しを実行」ボタン)が出る。保存先フォルダ欄は
+   クリック→Ctrl+A→SendKeys で書き換え可能で、`namingRule.directory` に依存せず毎回フォルダを指定できる
+   (ブリッジの `exportproj` はこの方式)。実行後の保存先はA.I.VOICE2側の設定にも保存される。
+3. `aivoice.exe <proj>` は **未起動時のみ**有効(起動時にそのプロジェクトを開く。起動〜ブロック表示まで約5秒)。
+   起動中に実行しても2重起動にはならず、既存インスタンスでプロジェクトが開かれることも無い(無視される)。
+   → 起動中は「ファイル」→「プロジェクトを開く」→ 開くダイアログ(#32770)へパス入力、で開く。
+4. 未保存の変更がある状態で「プロジェクトを開く」「終了」をすると Flutter 内ダイアログ
+   「プロジェクトが編集されています。編集内容を保存しますか？」(ボタン: 保存 / 破棄 / キャンセル)が出る。
+   ブリッジは、開いているのが VoiceDesk 生成プロジェクト(`voicedesk_<数字>.aieprojx`)なら「破棄」、
+   ユーザーのプロジェクトなら「キャンセル」を押して `ERR: DIRTY: ...` で中断する(勝手に破棄しない)。
+   書き出しを行うとプロジェクトは編集済み扱いになる(タイトルに `*` が付かない場合もある)。
+5. `app_settings.json` の書き換えは **A.I.VOICE2 停止中に行う必要がある**(終了時にメモリ上の設定で上書きされる)。
+   また `namingRule.directory` に Windows パス(`C:\...`)を書くと設定ファイル全体が「壊れている」扱いになり
+   `app_settings_<日時>_broken.json` に退避されて既定値に戻される(ユーザー設定が失われる)。パスは
+   `file:///C:/...` 形式の URI で書く必要がある(VoiceDesk は directory を書き換えない方針にした)。
+   JSON の空白・キー順は問わない(Node の `JSON.stringify` 出力で受理される)。
+6. 一括書き出しの所要時間(結月ゆかり 48kHz、3ブロック): 「書き出しを実行」から3ファイル生成まで約3〜5秒。
+   A.I.VOICE2 未起動からなら起動込みで約13〜17秒。
+7. `{Text=10}` で切り詰められたファイル名は末尾が `… `(三点リーダ+半角スペース)になる。行との対応付けには
+   先頭の `{Number=3}` のみを使う(`avParseExportNumber`)。
+
+## 4-2. 実装(feature/aivoice2-batch)
+
+- `bridge/aivoice2_bridge.ps1`: `-Action exportproj -Project <path> -OutDir <dir>`(未起動なら引数付き起動、起動中なら
+  メニューから開く → 一括書き出し → 保存先欄を書き換えて実行 → 呼び出し前の前面ウィンドウへ戻す)、
+  `-Action play/set/save -Character <キャラ名>`(キャラ一覧の項目クリック + Ctrl+Q で割り当て)、`-Action status`。
+- `index.html`: voiceId `av:<キャラ名>`(`characters.vpcx` から列挙、旧 `av` は互換で残す)、
+  `avEnsureSettings()`(A.I.VOICE2 停止中に `app_settings.json` を自動調整、`.voicedesk.bak` に退避)、
+  `avBatchExport()`(プロジェクト生成 → `exportproj` → `avWaitExports` で連番wavがそろいサイズが安定するまで待つ)、
+  全行保存では A.I.VOICE2 の行を先にまとめて書き出してから各行の配置を行う。保存先は他エンジンと同じ
+  `outDir/AIVOICE2_<キャラ名>/<連番>_<セリフ>.wav`。作業フォルダ(既定 `outDir/_aivoice2_export`)は毎回空にする。
+- 統合テスト(Premiere無し、Node から `avBatchExport`+`saveOneRow` を実行): 3行(通常/喜び/キャラ未指定)で
+  約17秒、wav+txt が各キャラフォルダに生成、作業フォルダに残骸無し。
 
 ## 5. 検証ログ(再現手順)
 - UIA 列挙: `bridge/aivoice2_bridge.ps1 -Action dump`(前面化あり)/ 同スクリプトの `SetForegroundWindow` を外しても列挙可。

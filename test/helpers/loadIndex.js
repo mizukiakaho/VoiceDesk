@@ -70,6 +70,21 @@ const EPILOGUE = [
   '  wavDurationSec: wavDurationSec,',
   '  writeSrt: writeSrt,',
   '  clearSavedRowsText: clearSavedRowsText,',
+  '  isAvVoice: isAvVoice,',
+  '  avCharName: avCharName,',
+  '  avParseCharacters: avParseCharacters,',
+  '  avSettingsIssues: avSettingsIssues,',
+  '  avPatchSettings: avPatchSettings,',
+  '  avProjectJson: avProjectJson,',
+  '  avParseExportNumber: avParseExportNumber,',
+  '  avExportDir: avExportDir,',
+  '  avDefaultCharsPath: avDefaultCharsPath,',
+  '  avDefaultSettingsPath: avDefaultSettingsPath,',
+  '  avEnsureSettings: avEnsureSettings,',
+  '  avBatchExport: avBatchExport,',
+  '  avWaitExports: avWaitExports,',
+  '  saveOneRow: saveOneRow,',
+  '  runBridge: runBridge,',
   '  __setState: function(s){',
   '    if(s.engines)        engines = s.engines;',
   '    if(s.trackMap)       trackMap = s.trackMap;',
@@ -137,7 +152,8 @@ function createLocalStorageMock() {
   };
 }
 
-function loadIndex() {
+function loadIndex(opts) {
+  opts = opts || {};
   const src = extractScriptSource();
   const doc = createDocumentMock();
   const localStorage = createLocalStorageMock();
@@ -149,7 +165,7 @@ function loadIndex() {
     },
     __adobe_cep__: {
       evalScript: function (script, cb) { if (cb) cb(''); },
-      getSystemPath: function () { return 'file:///C:/dummy'; }
+      getSystemPath: function () { return opts.extensionPath || 'file:///C:/dummy'; }
     },
     clipboardData: null
   };

@@ -141,11 +141,22 @@
       <input type="text" id="avExePath" placeholder="例: C:\\...\\aivoice.exe">
       <button class="fit" id="btnBrowseAvExe">参照</button>
     </div>
-    <label class="fld">A.I.VOICE2の書き出し先フォルダ(保存・配置に使用)</label>
+    <label class="fld">一括書き出しの作業フォルダ(空欄ならWAV出力フォルダ内の _aivoice2_export)</label>
     <div class="row">
-      <input type="text" id="avOutDir" placeholder="A.I.VOICE2側で設定している書き出し先">
+      <input type="text" id="avOutDir" placeholder="VoiceDeskが一時的に使う書き出し先(中身は毎回消去されます)">
       <button class="fit" id="btnBrowseAvOutDir">参照</button>
     </div>
+    <label class="fld">キャラクター一覧ファイル(characters.vpcx、空欄なら自動検出)</label>
+    <div class="row">
+      <input type="text" id="avCharsPath" placeholder="例: C:\\Users\\...\\Documents\\AI\\A.I.VOICE Editor\\2.0\\characters.vpcx">
+      <button class="fit" id="btnBrowseAvChars">参照</button>
+    </div>
+    <label class="fld">アプリケーション設定ファイル(app_settings.json、空欄なら自動検出)</label>
+    <div class="row">
+      <input type="text" id="avSettingsPath" placeholder="例: C:\\Users\\...\\AppData\\Local\\AI\\A.I.VOICE Editor\\2.0\\app_settings.json">
+      <button class="fit" id="btnBrowseAvSettings">参照</button>
+    </div>
+    <div class="hint">保存時はVoiceDeskがプロジェクト(.aieprojx)を生成してA.I.VOICE2で開き「一括書き出し」を1回だけ実行します。A.I.VOICE2側の「ファイル名の指定方法=命名規則」「一括書き出し=ブロックごと」の設定は、A.I.VOICE2が終了しているときにVoiceDeskが自動で調整します(元の設定は app_settings.json.voicedesk.bak に退避)。</div>
 
     <div class="hint">設定は自動保存されます。</div>
   </details>
@@ -290,6 +301,8 @@ function loadSettings(){
   $('avExePath').value  = s.avExePath  || '';
   $('outDir').value     = s.outDir     || '';
   $('avOutDir').value   = s.avOutDir   || '';
+  $('avCharsPath').value    = s.avCharsPath    || '';
+  $('avSettingsPath').value = s.avSettingsPath || '';
   $('vvAutoLaunch').checked = s.vvAutoLaunch !== false;
   engines = s.engines || [];
   if(engines.length === 0){
@@ -317,6 +330,8 @@ function saveSettings(){
     avExePath: $('avExePath').value.trim(),
     outDir:    $('outDir').value.trim(),
     avOutDir:  $('avOutDir').value.trim(),
+    avCharsPath:    $('avCharsPath').value.trim(),
+    avSettingsPath: $('avSettingsPath').value.trim(),
     engines:   engines,
     vvAutoLaunch: $('vvAutoLaunch').checked,
     txtEnc:    $('txtEnc').value,
@@ -332,10 +347,11 @@ function saveSettings(){
   };
   localStorage.setItem(SETTING_KEY, JSON.stringify(s));
 }
-['exePath','avExePath','outDir','avOutDir','vvAutoLaunch','txtEnc','makeTxt','namePrefix','insAudio','insGap','insGapRange'].forEach(id=>{
+['exePath','avExePath','outDir','avOutDir','avCharsPath','avSettingsPath','vvAutoLaunch','txtEnc','makeTxt','namePrefix','insAudio','insGap','insGapRange'].forEach(id=>{
   $(id).addEventListener('change', ()=>{
     saveSettings();
     if(id==='exePath') reloadVoices();
+    if(id==='avCharsPath'){ buildVoiceList(); renderRows(); }
   });
 });
 $('insGapRange').addEventListener('input', ()=>{ $('insGap').value = $('insGapRange').value; });
@@ -358,6 +374,8 @@ $('btnBrowseExe').addEventListener('click',      ()=>browse('exePath',   false, 
 $('btnBrowseAvExe').addEventListener('click',    ()=>browse('avExePath', false, ['exe']));
 $('btnBrowseOutDir').addEventListener('click',   ()=>browse('outDir',    true));
 $('btnBrowseAvOutDir').addEventListener('click', ()=>browse('avOutDir',  true));
+$('btnBrowseAvChars').addEventListener('click',   ()=>{ browse('avCharsPath', false, ['vpcx']); buildVoiceList(); renderRows(); });
+$('btnBrowseAvSettings').addEventListener('click',()=>browse('avSettingsPath', false, ['json']));
 
 // ================= ステータス =================
 function setStatus(msg, cls){
@@ -461,7 +479,12 @@ function buildVoiceList(){
       voiceList.push({id: 'vv:' + eng.name + ':' + sp.id, label: '[' + eng.name + '] ' + sp.label});
     }
   }
-  voiceList.push({id: AV_VOICE, label: '[A.I.VOICE2]'});
+  const avNames = avCharacters();
+  for(const n of avNames){
+    voiceList.push({id: AV_PREFIX + n, label: '[AV] ' + n});
+  }
+  // 旧voiceId 'av'(キャラ未指定)は互換のため残す: A.I.VOICE2側で先頭のキャラ/選択中のキャラが使われる
+  voiceList.push({id: AV_VOICE, label: avNames.length ? '[AV] (キャラ未指定)' : '[A.I.VOICE2]'});
 }
 
 function isFavVoice(id){
@@ -490,17 +513,18 @@ function partitionVoices(list, favs){
 }
 function voiceLabel(voiceId){
   const v = voiceList.find(x=>x.id === voiceId);
-  if(v) return v.label.replace(/^\[..\]\s*|^\[A\.I\.VOICE2\]$/g, m=>m.indexOf('A.I.')>=0?'AIVOICE2':'');
+  if(v) return v.label.replace(/^\[..\]\s*|^\[A\.I\.VOICE2\]$/g, m=>m.indexOf('A.I.')>=0?'AIVOICE2':'');   // [AV] 名前 → 名前 の部分だけを表示
   return voiceId || '';
 }
 function voiceShortName(voiceId){
   if(voiceId === AV_VOICE) return 'AIVOICE2';
+  if(isAvVoice(voiceId)) return avCharName(voiceId).replace(/[(（].*$/, '');
   const v = voiceList.find(x=>x.id === voiceId);
   if(!v) return '';
   return v.label.replace(/^\[..\]\s*/, '').replace(/[(（].*$/, '');
 }
 function trackFor(voiceId){
-  return trackMap[voiceId] || (voiceId === AV_VOICE ? '2' : '1');
+  return trackMap[voiceId] || (isAvVoice(voiceId) ? '2' : '1');
 }
 
 async function reloadVoices(){
@@ -830,6 +854,9 @@ function vvCharacterName(voiceId){
 function voiceFolderName(voiceId){
   if(voiceId === AV_VOICE) return 'AIVOICE2';
   const id = String(voiceId || '');
+  if(id.indexOf(AV_PREFIX) === 0){
+    return safeFileName('AIVOICE2_' + avCharName(id));
+  }
   if(id.indexOf('aq:') === 0){
     return safeFileName('AQ_' + id.slice(3));
   }
@@ -1074,30 +1101,166 @@ function runBridge(args){
       });
   });
 }
-function pollNewWav(dir, sinceMs, timeoutMs){
+const AV_PREFIX = 'av:';                                   // voiceId 'av:<キャラ名>'
+const AV_NAMING_RULE = '{Number=3}_{Character}_{Text=10}';  // A.I.VOICE2側に設定する命名規則(先頭の連番で行を対応付ける)
+const AV_EXPORT_SUBDIR = '_aivoice2_export';                // avOutDir未設定時の作業フォルダ名(outDir配下)
+
+function isAvVoice(voiceId){
+  const id = String(voiceId || '');
+  return id === AV_VOICE || id.indexOf(AV_PREFIX) === 0;
+}
+function avCharName(voiceId){
+  const id = String(voiceId || '');
+  return id.indexOf(AV_PREFIX) === 0 ? id.slice(AV_PREFIX.length) : '';
+}
+function avDefaultCharsPath(){
+  return path.join(os.homedir(), 'Documents', 'AI', 'A.I.VOICE Editor', '2.0', 'characters.vpcx');
+}
+function avDefaultSettingsPath(){
+  const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(local, 'AI', 'A.I.VOICE Editor', '2.0', 'app_settings.json');
+}
+function avCharsPath(){ return $('avCharsPath').value.trim() || avDefaultCharsPath(); }
+function avSettingsPath(){ return $('avSettingsPath').value.trim() || avDefaultSettingsPath(); }
+function avExportDir(outDir){ return $('avOutDir').value.trim() || path.join(outDir, AV_EXPORT_SUBDIR); }
+
+// characters.vpcx のJSON文字列からキャラクター名の配列を返す(順序はファイルどおり)
+function avParseCharacters(jsonText){
+  try{
+    const obj = JSON.parse(jsonText);
+    if(!obj || !Array.isArray(obj.characters)) return [];
+    return obj.characters.map(c=>c && c.name).filter(n=>typeof n === 'string' && n);
+  }catch(e){ return []; }
+}
+function avCharacters(){
+  try{ return avParseCharacters(fs.readFileSync(avCharsPath(), 'utf8')); }catch(e){ return []; }
+}
+// app_settings.json(パース済み)がVoiceDeskの一括書き出しに必要な設定を満たしていない項目を列挙する
+function avSettingsIssues(obj){
+  const issues = [];
+  const sw = obj && obj.saveWave;
+  if(!sw || typeof sw !== 'object'){ issues.push('書き出し設定(saveWave)が見つかりません'); return issues; }
+  if(sw.filePathSelectionMode !== 'namingRule') issues.push('ファイル名の指定方法 → ファイル命名規則で指定');
+  const nr = (sw.namingRule && typeof sw.namingRule === 'object') ? sw.namingRule : {};
+  if(!/\{Number(=\d+)?\}/.test(String(nr.file || ''))) issues.push('命名規則 → ' + AV_NAMING_RULE);
+  if(nr.numberStart !== 1) issues.push('連番の開始番号 → 1');
+  if(sw.exportAllAction !== 'textblock') issues.push('一括書き出しの動作 → テキストブロックごとにファイルに書き出す');
+  return issues;
+}
+// 必要な項目だけを書き換えた新しい設定オブジェクトを返す(他の設定は保持)
+function avPatchSettings(obj){
+  const out = JSON.parse(JSON.stringify(obj || {}));
+  if(!out.saveWave || typeof out.saveWave !== 'object') out.saveWave = {};
+  const sw = out.saveWave;
+  sw.filePathSelectionMode = 'namingRule';
+  if(!sw.namingRule || typeof sw.namingRule !== 'object') sw.namingRule = {};
+  if(!/\{Number(=\d+)?\}/.test(String(sw.namingRule.file || ''))) sw.namingRule.file = AV_NAMING_RULE;
+  if(typeof sw.namingRule.directory !== 'string') sw.namingRule.directory = '';
+  if(typeof sw.namingRule.textLength !== 'number') sw.namingRule.textLength = 10;
+  if(typeof sw.namingRule.numberDigit !== 'number') sw.namingRule.numberDigit = 3;
+  sw.namingRule.numberStart = 1;
+  sw.exportAllAction = 'textblock';
+  return out;
+}
+function avIsRunning(){
+  try{
+    const exe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tasklist.exe');
+    const out = cp.execFileSync(exe, ['/FI', 'IMAGENAME eq aivoice.exe', '/NH'], {windowsHide:true}).toString();
+    return /aivoice\.exe/i.test(out);
+  }catch(e){ return false; }
+}
+// A.I.VOICE2の設定を確認し、不足していれば(A.I.VOICE2停止中に限り)書き換える
+function avEnsureSettings(){
+  const p = avSettingsPath();
+  let obj = null;
+  try{ obj = JSON.parse(fs.readFileSync(p, 'utf8')); }
+  catch(e){ return {ok:false, msg:'A.I.VOICE2の設定ファイルを読めません(A.I.VOICE2を一度起動して終了するか、設定でパスを指定してください):\n' + p}; }
+  const issues = avSettingsIssues(obj);
+  if(issues.length === 0) return {ok:true, changed:false};
+  if(avIsRunning()){
+    return {ok:false, msg:'A.I.VOICE2の設定をVoiceDesk用に自動調整するため、A.I.VOICE2を終了してから再実行してください。\n変更内容:\n・' + issues.join('\n・')};
+  }
+  try{
+    fs.copyFileSync(p, p + '.voicedesk.bak');
+    fs.writeFileSync(p, JSON.stringify(avPatchSettings(obj)), 'utf8');
+  }catch(e){ return {ok:false, msg:'A.I.VOICE2の設定ファイルを更新できませんでした: ' + e.message}; }
+  return {ok:true, changed:true, issues:issues};
+}
+// A.I.VOICE2のプロジェクトファイル(.aieprojx)のJSON文字列を作る。items: [{character, text}]
+function avProjectJson(items){
+  return JSON.stringify({version:'3.1', textblocks: items.map(it=>({character: String(it.character), text: String(it.text)}))});
+}
+// 一括書き出しで生成されたファイル名(例 "001_結月ゆかり(通常_こんにちは.wav")から連番を取り出す
+function avParseExportNumber(fileName){
+  const m = String(fileName).match(/^(\d+)_.*\.wav$/i);
+  return m ? parseInt(m[1], 10) : null;
+}
+// 作業フォルダに連番付きwavがn個そろい、サイズが安定するまで待つ。戻り値: {連番: フルパス} / タイムアウト時 null
+function avWaitExports(dir, n, timeoutMs){
   return new Promise((resolve)=>{
     const t0 = Date.now();
+    let lastSig = null;
     const iv = setInterval(()=>{
       try{
-        const files = fs.readdirSync(dir).filter(f=>/\.wav$/i.test(f));
-        let newest = null, nm = sinceMs;
-        for(const f of files){
-          const st = fs.statSync(path.join(dir, f));
-          if(st.mtimeMs > nm){ nm = st.mtimeMs; newest = f; }
+        const map = {};
+        const sizes = [];
+        for(const f of fs.readdirSync(dir)){
+          const num = avParseExportNumber(f);
+          if(num === null) continue;
+          const p = path.join(dir, f);
+          map[num] = p;
+          sizes.push(num + ':' + fs.statSync(p).size);
         }
-        if(newest){
-          clearInterval(iv);
-          setTimeout(()=>resolve(path.join(dir, newest)), 800);
-          return;
+        if(sizes.length >= n){
+          const sig = sizes.sort().join('|');
+          if(sig === lastSig){ clearInterval(iv); resolve(map); return; }
+          lastSig = sig;
         }
       }catch(e){}
       if(Date.now() - t0 > timeoutMs){ clearInterval(iv); resolve(null); }
-    }, 1500);
+    }, 500);
   });
+}
+function moveFile(src, dst){
+  try{ fs.renameSync(src, dst); }
+  catch(e){ fs.copyFileSync(src, dst); fs.unlinkSync(src); }
+}
+// A.I.VOICE2の行をまとめて書き出す(プロジェクト生成 → exportproj → ファイル待ち)。
+// 戻り値: {ok, msg, results: Map(row -> 作業フォルダ内のwavパス)}
+async function avBatchExport(rows, exportDir){
+  const avErr = checkAvExePath();
+  if(avErr) return {ok:false, msg:avErr};
+  const st = avEnsureSettings();
+  if(!st.ok) return {ok:false, msg:st.msg};
+  const names = avCharacters();
+  if(names.length === 0) return {ok:false, msg:'A.I.VOICE2のキャラクター一覧(characters.vpcx)を読めません。設定のパスを確認してください:\n' + avCharsPath()};
+  const items = [];
+  for(const row of rows){
+    const ch = avCharName(row.voice) || names[0];
+    if(names.indexOf(ch) < 0) return {ok:false, msg:'A.I.VOICE2にキャラクター「' + ch + '」がありません(声リストを再読込してください)'};
+    items.push({character: ch, text: (row.text || '').trim()});
+  }
+  try{
+    fs.mkdirSync(exportDir, {recursive:true});
+    // VoiceDesk専用の作業フォルダなので前回の残骸を消す(上書き確認ダイアログの抑止・番号の混同防止)
+    for(const f of fs.readdirSync(exportDir)){ try{ fs.unlinkSync(path.join(exportDir, f)); }catch(e){} }
+  }catch(e){ return {ok:false, msg:'A.I.VOICE2の作業フォルダを用意できません: ' + exportDir}; }
+  const projPath = path.join(os.tmpdir(), 'voicedesk_' + Date.now() + '.aieprojx');
+  fs.writeFileSync(projPath, avProjectJson(items), 'utf8');
+  setStatus('A.I.VOICE2で一括書き出し中... (' + items.length + '行)' + (st.changed ? '\n(A.I.VOICE2の書き出し設定を自動調整しました)' : ''), 'run');
+  const r = await runBridge(['-Action','exportproj','-Project', projPath, '-OutDir', exportDir]);
+  if(!r.ok) return {ok:false, msg:'A.I.VOICE2エラー: ' + r.msg};
+  const found = await avWaitExports(exportDir, items.length, 30000 + 8000 * items.length);
+  try{ fs.unlinkSync(projPath); }catch(e){}
+  if(!found) return {ok:false, msg:'A.I.VOICE2の書き出しを検知できませんでした:\n' + exportDir};
+  const results = new Map();
+  rows.forEach((row, i)=>{ if(found[i+1]) results.set(row, found[i+1]); });
+  if(results.size !== rows.length) return {ok:false, msg:'A.I.VOICE2の書き出しファイル数(' + results.size + ')が行数(' + rows.length + ')と一致しません'};
+  return {ok:true, results: results};
 }
 
 // ================= 1行分の保存処理(全行保存・個別保存で共有) =================
-// ctx = {dir, avDir, insAudio, offset}
+// ctx = {dir, avDir, insAudio, offset, avResults?}   avResults: 全行保存時に avBatchExport で得た Map(row -> wavパス)
 // 戻り値: {ok, wavPath, msg, advance, startSec, endSec}
 async function saveOneRow(row, ctx){
   const text = row.text.trim();
@@ -1117,26 +1280,19 @@ async function saveOneRow(row, ctx){
     wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
     if(pathTooLong(wavPath)){ return {ok:false, msg: pathLenMsg(wavPath)}; }
     await vvSynthToFile(row.voice, text, wavPath);
-  } else if(row.voice === AV_VOICE){
-    const avDir = ctx.avDir;
-    if(!avDir || !fs.existsSync(avDir)){ return {ok:false, msg:'A.I.VOICE2の書き出し先フォルダを設定してください'}; }
-    const avErr = checkAvExePath();
-    if(avErr){ return {ok:false, msg: avErr}; }
-    const since = Date.now();
-    const r = await runBridge(['-Action','save','-Text', text]);
-    if(!r.ok){ return {ok:false, msg:'A.I.VOICE2エラー: ' + r.msg}; }
-    setStatus('A.I.VOICE2の書き出しを待っています...\n' + text, 'run');
-    const rawWavPath = await pollNewWav(avDir, since, 120000);
-    if(!rawWavPath){ return {ok:false, msg:'A.I.VOICE2の書き出しを検知できませんでした'}; }
-    const avSubDir = voiceOutDir(avDir, AV_VOICE);
-    const avDestPath = nextSeqWavPath(avSubDir, wavBaseName(row.voice, text));
-    if(pathTooLong(avDestPath)){ return {ok:false, msg: pathLenMsg(avDestPath)}; }
-    try{
-      fs.renameSync(rawWavPath, avDestPath);
-      wavPath = avDestPath;
-    }catch(e){
-      wavPath = rawWavPath;
+  } else if(isAvVoice(row.voice)){
+    // 全行保存では事前に avBatchExport 済み(ctx.avResults)。個別保存は1行だけのバッチとして実行する
+    let rawWavPath = ctx.avResults ? ctx.avResults.get(row) : null;
+    if(!rawWavPath){
+      const b = await avBatchExport([row], ctx.avDir);
+      if(!b.ok){ return {ok:false, msg:b.msg}; }
+      rawWavPath = b.results.get(row);
     }
+    const vDir = voiceOutDir(dir, row.voice);
+    wavPath = nextSeqWavPath(vDir, wavBaseName(row.voice, text));
+    if(pathTooLong(wavPath)){ return {ok:false, msg: pathLenMsg(wavPath)}; }
+    moveFile(rawWavPath, wavPath);
+    try{ fs.unlinkSync(rawWavPath.replace(/\.wav$/i, '.txt')); }catch(e){}   // A.I.VOICE2が同時保存したtxtは使わない(文字コード設定に従いVoiceDeskが作る)
   } else {
     return {ok:true, wavPath:null, msg:'', advance:0};
   }
@@ -1183,11 +1339,14 @@ async function playRow(row){
       };
       setStatus('再生中(VOICEVOX)...', 'run');
       await currentAudio.play();
-    } else if(row.voice === AV_VOICE){
+    } else if(isAvVoice(row.voice)){
       const avErr = checkAvExePath();
       if(avErr){ setStatus(avErr, 'err'); return; }
       setStatus('A.I.VOICE2で再生中...', 'run');
-      const r = await runBridge(['-Action','play','-Text', text]);
+      const args = ['-Action','play','-Text', text];
+      const ch = avCharName(row.voice);
+      if(ch) args.push('-Character', ch);
+      const r = await runBridge(args);
       if(!r.ok){ setStatus('A.I.VOICE2エラー: ' + r.msg, 'err'); return; }
       setStatus('A.I.VOICE2: 再生を開始しました', 'ok');
     }
@@ -1214,9 +1373,8 @@ async function saveRow(row, div, saveBtn){
     try{ fs.mkdirSync(dir, {recursive:true}); }
     catch(e){ setStatus('出力フォルダを作成できません:\n' + dir, 'err'); return; }
   }
-  const avDir = $('avOutDir').value.trim();
-  if(row.voice === AV_VOICE){
-    if(!avDir || !fs.existsSync(avDir)){ setStatus('A.I.VOICE2の書き出し先フォルダを設定してください', 'err'); return; }
+  const avDir = avExportDir(dir);
+  if(isAvVoice(row.voice)){
     const avErr = checkAvExePath();
     if(avErr){ setStatus(avErr, 'err'); return; }
   }
@@ -1258,17 +1416,27 @@ $('btnSaveAll').addEventListener('click', async ()=>{
     catch(e){ setStatus('出力フォルダを作成できません:\n' + dir, 'err'); return; }
   }
   const insAudio = $('insAudio').checked;
-  const avDir = $('avOutDir').value.trim();
+  const avDir = avExportDir(dir);
   let offset = 0, ok = 0;
   let base = null;
   saving = true;
   $('btnSaveAll').disabled = true;
   try{
+    // A.I.VOICE2の行は先にまとめて書き出す(プロジェクト生成→一括書き出し1回)。行順は保存順と同じ
+    const avRows = rows.filter(r=>isAvVoice(r.voice));
+    let avResults = null;
+    if(avRows.length){
+      const avErr = checkAvExePath();
+      if(avErr){ setStatus(avErr, 'err'); return; }
+      const b = await avBatchExport(avRows, avDir);
+      if(!b.ok){ setStatus(b.msg, 'err'); return; }
+      avResults = b.results;
+    }
     for(let i = 0; i < rows.length; i++){
       const row = rows[i];
       const text = row.text.trim();
       setStatus('保存中... (' + (i+1) + '/' + rows.length + ')\n' + text, 'run');
-      const res = await saveOneRow(row, {dir:dir, avDir:avDir, insAudio:insAudio, offset:offset});
+      const res = await saveOneRow(row, {dir:dir, avDir:avDir, insAudio:insAudio, offset:offset, avResults:avResults});
       if(!res.ok){ setStatus(res.msg + '\n(' + ok + '件保存済み)', 'err'); return; }
       if(!res.wavPath) continue;
       if(typeof res.startSec === 'number' && typeof res.endSec === 'number'){
