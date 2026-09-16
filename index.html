@@ -267,7 +267,9 @@ const JSX_ERR = {
   'IMPORT_WAV': 'WAVのプロジェクト読み込みに失敗しました',
   'IMPORT_SRT': '字幕(SRT)のプロジェクト読み込みに失敗しました',
   'TRACK_LOCKED': '対象のオーディオトラックがロックされています',
-  'NO_CAPTION_API': 'このPremiereバージョンは字幕挿入APIに未対応です'
+  'NO_CAPTION_API': 'このPremiereバージョンは字幕挿入APIに未対応です',
+  'NO_PLAYHEAD_API': 'このPremiereバージョンは再生ヘッド移動APIに未対応です',
+  'BAD_POSITION': '再生ヘッドの移動先が不正です'
 };
 function jsxErrMsg(raw){
   const key = String(raw).replace(/^ERR:/, '');
@@ -1028,6 +1030,12 @@ async function placeAudio(wavPath, trackNum, offsetSec, binName){
   }
   return {ok:true, msg:'配置OK(A' + (trackNum||'1') + ')'};
 }
+async function movePlayhead(sec){
+  if(!isFinite(sec) || sec < 0) return {ok:false, msg:'再生ヘッドの移動先が不正です'};
+  const r = await evalJsx('setPlayheadSec', [sec]);
+  if(String(r).indexOf('ERR:') === 0) return {ok:false, msg:'再生ヘッド移動エラー: ' + jsxErrMsg(r)};
+  return {ok:true};
+}
 
 // ================= AquesTalk =================
 let currentProc = null;
@@ -1318,7 +1326,12 @@ async function saveRow(row, div, saveBtn){
     div.classList.add('saved');
     addHistory(voiceShortName(row.voice) + ' | ' + path.basename(res.wavPath));
     saveSettings();
-    setStatus('保存しました: ' + path.basename(res.wavPath) + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
+    let statusMsg = '保存しました: ' + path.basename(res.wavPath) + (insAudio ? '(シーケンスに配置済み)' : '');
+    if(insAudio && typeof res.endSec === 'number' && isFinite(res.endSec)){
+      const mv = await movePlayhead(res.endSec + getInsGap());
+      if(!mv.ok) statusMsg += '\n(' + mv.msg + ')';
+    }
+    setStatus(statusMsg, 'ok');
   }catch(e){
     const m = (e && e.code === 'ENAMETOOLONG')
       ? 'ファイルパスが長すぎて保存できませんでした。出力フォルダを浅い場所に変えてください。'
@@ -1346,6 +1359,7 @@ $('btnSaveAll').addEventListener('click', async ()=>{
   const avDir = $('avOutDir').value.trim();
   let offset = 0, ok = 0;
   let base = null;
+  let lastEnd = null;
   saving = true;
   $('btnSaveAll').disabled = true;
   try{
@@ -1359,6 +1373,7 @@ $('btnSaveAll').addEventListener('click', async ()=>{
       if(typeof res.startSec === 'number' && typeof res.endSec === 'number'){
         if(base === null) base = res.startSec;
         offset = res.endSec - base + getInsGap();
+        lastEnd = res.endSec;
       } else {
         offset += res.advance || 0;
       }
@@ -1366,7 +1381,12 @@ $('btnSaveAll').addEventListener('click', async ()=>{
       ok++;
       addHistory(voiceShortName(row.voice) + ' | ' + path.basename(res.wavPath));
     }
-    setStatus('保存完了: ' + ok + '件' + (insAudio ? '(シーケンスに配置済み)' : ''), 'ok');
+    let doneMsg = '保存完了: ' + ok + '件' + (insAudio ? '(シーケンスに配置済み)' : '');
+    if(insAudio && lastEnd !== null){
+      const mv = await movePlayhead(lastEnd + getInsGap());
+      if(!mv.ok) doneMsg += '\n(' + mv.msg + ')';
+    }
+    setStatus(doneMsg, 'ok');
   }catch(e){
     const m = (e && e.code === 'ENAMETOOLONG')
       ? 'ファイルパスが長すぎて保存できませんでした。出力フォルダを浅い場所に変えてください。'

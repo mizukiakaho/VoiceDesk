@@ -168,6 +168,11 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
   ターゲットトラック(またはトラック番号)ごとにSRTを分けてこの関数を複数回呼ぶ。
   1回の呼び出し=1キャプショントラックという不変条件は変わらない。
   createCaptionTrackはトラック名を指定できない
+- `setPlayheadSec(sec)` … シーケンスの再生ヘッド(CTI)を絶対位置`sec`秒へ移動する。
+  `Sequence.setPlayerPosition(ticksString)`は引数が秒ではなくticks文字列(1秒=
+  `$._AQV_.TICKS_PER_SEC`=254016000000ticks)のため、秒→ticksへ変換し`String(ticks)`で
+  渡す(数値のまま渡すとAPIが受け付けない)。安全整数上限を超えるticksになる場合は
+  `ERR:BAD_POSITION`を返す
 - 戻り値規約: `OK:...` / `ERR:<コード>`。コードは index.html の JSX_ERR で日本語化
 
 ### 保存時のフォルダ構成・連番仕様(index.html)
@@ -206,9 +211,17 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
 - `insAudio`ON時は`placeAudio`→`placeVoice`の第4引数(binName)に`voiceFolderName(voiceId)`を
   渡し、PremiereのVoiceDeskビン配下に同名のサブビンが作られてそこにインポートされる
 - 1行分の保存処理は`saveOneRow(row, ctx)`(`ctx = {dir, avDir, insAudio, offset}`、戻り値
-  `{ok, wavPath, msg, advance}`)に集約されており、全行保存(`btnSaveAll`)と行ごとの
-  個別保存(`saveRow`、💾ボタン)の両方から呼ばれる。連番・フォルダ構成・txt生成・
-  A.I.VOICE2のrename処理はこの関数に一元化されている
+  `{ok, wavPath, msg, advance, startSec, endSec}`)に集約されており、全行保存(`btnSaveAll`)と
+  行ごとの個別保存(`saveRow`、💾ボタン)の両方から呼ばれる。連番・フォルダ構成・txt生成・
+  A.I.VOICE2のrename処理はこの関数に一元化されている。`saveOneRow`自体はプレイヘッドを
+  動かさない(全行保存の`offset`計算が二重加算になるため)
+- `insAudio`ON時、保存後にPremiereの再生ヘッドを配置したクリップの終端(+`insGap`)へ
+  自動で進める(`movePlayhead()`、`$._AQV_.setPlayheadSec`を呼ぶ)。個別保存(`saveRow`)は
+  その行の`res.endSec`を使って毎回移動する。全行保存(`btnSaveAll`)はループ中は移動せず
+  `lastEnd`に最後の`endSec`を記録しておき、全行成功後に1回だけ最終位置へ移動する
+  (`offset`計算式自体は変更しない)。移動先が取れない場合(`res.endSec`が無い等)や
+  途中でエラー終了した場合は移動しない。移動自体が失敗した場合も保存処理は成功扱いのまま、
+  ステータスメッセージにエラー内容を注記するだけに留める
 - 保存に成功した行は`row.saved=true`になり、グレー表示される。「使用済みのセリフを削除」
   (`btnDelSaved`)は`saved`が立った行のセリフ(text)を空にし`saved`を解除する(行自体・声・
   トラック設定は残る。行が削除されるわけではない)。この配列操作は純粋関数

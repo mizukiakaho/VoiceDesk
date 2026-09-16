@@ -127,3 +127,23 @@ $._AQV_.insertCaption = function (srtPath) {
         return 'ERR:' + e.toString();
     }
 };
+
+// ticks per second used by Premiere internal clock
+$._AQV_.TICKS_PER_SEC = 254016000000;
+
+// move sequence playhead (CTI) to the given absolute position in seconds
+$._AQV_.setPlayheadSec = function (sec) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return 'ERR:NO_SEQUENCE';
+        if (typeof seq.setPlayerPosition !== 'function') return 'ERR:NO_PLAYHEAD_API';
+        var s = Number(sec);
+        if (isNaN(s) || s < 0) return 'ERR:BAD_POSITION';
+        var ticks = Math.round(s * $._AQV_.TICKS_PER_SEC);
+        if (!isFinite(ticks) || ticks > 9007199254740991) return 'ERR:BAD_POSITION';
+        seq.setPlayerPosition(String(ticks));
+        return 'OK:PLAYHEAD\t' + s;
+    } catch (e) {
+        return 'ERR:' + e.toString();
+    }
+};
