@@ -24,8 +24,9 @@ Premiere Pro用パネル「VoiceDesk」を改修してください。
 3. powershell.exe は必ずフルパス(PS_EXE定数)で呼ぶ
 4. ExtendScriptのグローバルは $._AQV_ 名前空間のみ使用する
 5. ExtendScriptはES3相当。const/let/アロー関数/テンプレートリテラル禁止(varのみ)
-6. パネル側(index.html)はChromium相当なのでモダンJS可。ただしlocalStorageの
-   設定スキーマ(SPEC.md参照)との互換性を維持する
+6. パネル側(index.html)はChromium相当なのでモダンJS可。ただし設定の保存先は
+   共通ファイル(%APPDATA%\VoiceDesk\settings.json)とlocalStorage(台本のみ、
+   キーvoicedesk_rows_v1)に分かれている。そのスキーマ(SPEC.md参照)との互換性を維持する
 7. 外部ライブラリの追加は不可(Node標準モジュールとCEP APIのみ)
 8. 設定に新しいパスを追加する場合、初期値は空にして参照ボタンを付ける(配布用のため)
 
