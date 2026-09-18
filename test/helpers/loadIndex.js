@@ -14,6 +14,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const vm = require('vm');
 
@@ -70,6 +71,12 @@ const EPILOGUE = [
   '  wavDurationSec: wavDurationSec,',
   '  writeSrt: writeSrt,',
   '  clearSavedRowsText: clearSavedRowsText,',
+  '  pickGlobalSettings: pickGlobalSettings,',
+  '  globalSettingsPath: globalSettingsPath,',
+  '  globalSettingsDir: globalSettingsDir,',
+  '  loadSettings: loadSettings,',
+  '  saveSettings: saveSettings,',
+  '  __getEngines: function(){ return engines; },',
   '  __setState: function(s){',
   '    if(s.engines)        engines = s.engines;',
   '    if(s.trackMap)       trackMap = s.trackMap;',
@@ -137,6 +144,15 @@ function createLocalStorageMock() {
   };
 }
 
+// loadIndex()呼び出しごとに作成する一時APPDATAフォルダを記録し、テストプロセス終了時に
+// まとめて削除する(個々のテストではクリーンアップせず、プロセス終了時の一括削除で十分)。
+const createdTmpDirs = [];
+process.once('exit', function () {
+  createdTmpDirs.forEach(function (dir) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* best-effort */ }
+  });
+});
+
 function loadIndex() {
   const src = extractScriptSource();
   const doc = createDocumentMock();
@@ -154,12 +170,20 @@ function loadIndex() {
     clipboardData: null
   };
 
+  // index.html は共通設定を process.env.APPDATA 配下の VoiceDesk\settings.json に
+  // 書き込む(writeGlobalSettings/globalSettingsDir)。テストではサンドボックスに渡す
+  // process.env.APPDATA を一時フォルダに差し替え、テストが実ユーザーの
+  // %APPDATA%\VoiceDesk\settings.json を上書きしないようにする。
+  // index.html は process.env しか使わないため、これで十分。
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'voicedesk-test-'));
+  createdTmpDirs.push(tmpDir);
+
   const sandbox = {
     require: require,
     document: doc,
     window: windowStub,
     localStorage: localStorage,
-    process: process,
+    process: { env: Object.assign({}, process.env, { APPDATA: tmpDir }) },
     Buffer: Buffer,
     URL: URL,
     TextDecoder: TextDecoder,
@@ -188,7 +212,9 @@ function loadIndex() {
     },
     getEl: function (id) {
       return doc.getElementById(id);
-    }
+    },
+    __settingsDir: tmpDir,
+    __localStorage: localStorage
   });
 }
 
