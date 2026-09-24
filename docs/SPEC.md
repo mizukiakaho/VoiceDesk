@@ -224,8 +224,18 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
 - A.I.VOICE2の行は`avBatchExport(rows, exportDir)`でまとめて書き出す(全行保存では`btnSaveAll`が
   A.I.VOICE2の行だけ先に1回のバッチで書き出し、結果の`Map(row -> 作業フォルダ内wav)`を`ctx.avResults`として
   `saveOneRow`へ渡す。個別保存は1行だけのバッチ)。作業フォルダは`avExportDir(outDir)`
-  (`avOutDir`設定、空なら`outDir/_aivoice2_export`)で、VoiceDesk専用のため**毎回中身を全消去**してから
-  書き出す(A.I.VOICE2の上書き確認ダイアログの抑止・連番の混同防止)。`saveOneRow`は作業フォルダの
+  (`avOutDir`設定、空なら`outDir/_aivoice2_export`)。書き出し前に`avPrepareWorkDir(dir)`が
+  前回の書き出し残骸を消す(A.I.VOICE2の上書き確認ダイアログの抑止・連番の混同防止)。何を消してよいかは
+  純粋関数`avWorkDirPlan(names)`(戻り値`{ok, needMarker, remove, foreign}`)が決める:
+  - 目印ファイル`.voicedesk_workdir`(`AV_WORKDIR_MARKER`)が無いフォルダは、空(または未作成)のときだけ
+    使う。作成・空なら目印を置いて以後VoiceDeskの作業フォルダとみなす。空でなければ**連番wavしか無くても
+    何も消さず中止**する(旧バージョンでは`avOutDir`が「A.I.VOICE2の書き出し先フォルダ」で、設定移行で
+    その値が引き継がれる。そこには利用者の本番音声が連番名で置かれている可能性があるため)
+  - 目印のあるフォルダでも、消すのは命名規則の書き出し名(`avParseExportNumber`が数値を返す`^\d+_.*\.wav$`)と
+    連番txt(`^\d+_.*\.txt$`)だけ。それ以外のファイル・サブフォルダが1つでもあれば何も消さず中止する
+  - 中止時は該当ファイル名(先頭5件)と「作業フォルダを空欄に戻すか空の専用フォルダを指定」する案内を
+    ステータスに出す。この確認は`avEnsureSettings()`より前に行い、中止時にA.I.VOICE2の設定を書き換えない
+  `saveOneRow`は作業フォルダの
   wavを`outDir/AIVOICE2_<キャラ名>/<連番>_<セリフ>.wav`へ`moveFile`(rename、失敗時はcopy+unlink)で移し、
   A.I.VOICE2が同時保存したtxtは捨てて`makeTxt`/`txtEnc`設定に従いVoiceDeskがtxtを作る
 - `insAudio`ON時は`placeAudio`→`placeVoice`の第4引数(binName)に`voiceFolderName(voiceId)`を

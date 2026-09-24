@@ -1,6 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { loadIndex } = require('./helpers/loadIndex.js');
 
@@ -144,6 +146,101 @@ test('avParseExportNumber: 先頭の連番を取り出す(wav以外・連番無�
   assert.equal(api.avParseExportNumber('001_結月ゆかり(通常_一行目.txt'), null);
   assert.equal(api.avParseExportNumber('ブリッジ経由の一つ目… .wav'), null);
   assert.equal(api.avParseExportNumber('voicedesk.wav'), null);
+});
+
+// ---------- 作業フォルダの安全確認 ----------
+const MARK = '.voicedesk_workdir';
+
+test('avWorkDirPlan: 空フォルダは書き出し可、目印を作る', () => {
+  const api = loadIndex();
+  assert.equal(api.AV_WORKDIR_MARKER, MARK);
+  const p = api.avWorkDirPlan([]);
+  assert.equal(p.ok, true);
+  assert.equal(p.needMarker, true);
+  assert.equal(p.remove.length, 0);
+  assert.equal(api.avWorkDirPlan(null).ok, true);
+});
+
+test('avWorkDirPlan: 目印付きなら連番wavと連番txtだけを消し、目印は残す', () => {
+  const api = loadIndex();
+  const p = api.avWorkDirPlan([MARK, '001_結月ゆかり(通常_こんにちは.wav', '001_結月ゆかり(通常_こんにちは.txt', '002_x.WAV', '003_y.txt']);
+  assert.equal(p.ok, true);
+  assert.equal(p.needMarker, false);
+  assert.equal(JSON.stringify(p.remove), JSON.stringify(['001_結月ゆかり(通常_こんにちは.wav', '001_結月ゆかり(通常_こんにちは.txt', '002_x.WAV', '003_y.txt']));
+  assert.equal(p.foreign.length, 0);
+  const only = api.avWorkDirPlan([MARK]);
+  assert.equal(only.ok, true);
+  assert.equal(only.remove.length, 0);
+});
+
+test('avWorkDirPlan: 目印付きでも連番以外のファイルがあれば中止し、何も消さない', () => {
+  const api = loadIndex();
+  const p = api.avWorkDirPlan([MARK, '001_a.wav', 'ナレーション.wav', 'memo.txt', '001_a.mp3', 'sub' + path.sep]);
+  assert.equal(p.ok, false);
+  assert.equal(JSON.stringify(p.foreign), JSON.stringify(['ナレーション.wav', 'memo.txt', '001_a.mp3', 'sub' + path.sep]));
+});
+
+test('avWorkDirPlan: 目印の無い空でないフォルダは、連番wavだけでも消さずに中止する(旧設定の本番フォルダ対策)', () => {
+  const api = loadIndex();
+  const names = [];
+  for (let i = 1; i <= 30; i++) names.push(String(i).padStart(3, '0') + '_ナレーション_' + i + '.wav');
+  const p = api.avWorkDirPlan(names);
+  assert.equal(p.ok, false);
+  assert.equal(p.remove.length, 0);
+  assert.equal(p.foreign.length, 30);
+  assert.equal(api.avWorkDirPlan(['desktop.ini']).ok, false);
+});
+
+function mkTmp() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'voicedesk-avwork-'));
+}
+function lsSorted(dir) {
+  return JSON.stringify(fs.readdirSync(dir).sort());
+}
+
+test('avPrepareWorkDir: 無いフォルダは作成して目印を置く', () => {
+  const api = loadIndex();
+  const root = mkTmp();
+  try {
+    const dir = path.join(root, 'work');
+    assert.equal(api.avPrepareWorkDir(dir).ok, true);
+    assert.equal(lsSorted(dir), JSON.stringify([MARK]));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('avPrepareWorkDir: 目印付きフォルダの前回の書き出しだけを消す', () => {
+  const api = loadIndex();
+  const dir = mkTmp();
+  try {
+    fs.writeFileSync(path.join(dir, MARK), '');
+    fs.writeFileSync(path.join(dir, '001_a.wav'), 'x');
+    fs.writeFileSync(path.join(dir, '001_a.txt'), 'x');
+    assert.equal(api.avPrepareWorkDir(dir).ok, true);
+    assert.equal(lsSorted(dir), JSON.stringify([MARK]));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('avPrepareWorkDir: 利用者のファイルがあるフォルダは1つも消さず、日本語の案内を返す', () => {
+  const api = loadIndex();
+  const dir = mkTmp();
+  try {
+    fs.writeFileSync(path.join(dir, '001_本番ナレーション.wav'), 'x');
+    fs.writeFileSync(path.join(dir, '001_本番ナレーション.txt'), 'x');
+    fs.mkdirSync(path.join(dir, 'old'));
+    const before = lsSorted(dir);
+    const r = api.avPrepareWorkDir(dir);
+    assert.equal(r.ok, false);
+    assert.ok(r.msg.indexOf('書き出しを中止しました') >= 0);
+    assert.ok(r.msg.indexOf('空欄に戻すか、空の専用フォルダを指定してください') >= 0);
+    assert.ok(r.msg.indexOf(dir) >= 0);
+    assert.equal(lsSorted(dir), before, '目印も作らず、何も消さない');
+
+    // 目印があっても連番以外が混ざっていれば消さない
+    fs.writeFileSync(path.join(dir, MARK), '');
+    const before2 = lsSorted(dir);
+    assert.equal(api.avPrepareWorkDir(dir).ok, false);
+    assert.equal(lsSorted(dir), before2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ---------- パス既定値 ----------

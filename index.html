@@ -143,7 +143,7 @@
     </div>
     <label class="fld">一括書き出しの作業フォルダ(空欄ならWAV出力フォルダ内の _aivoice2_export)</label>
     <div class="row">
-      <input type="text" id="avOutDir" placeholder="VoiceDeskが一時的に使う書き出し先(中身は毎回消去されます)">
+      <input type="text" id="avOutDir" placeholder="空の専用フォルダを指定(VoiceDeskが書き出した音声は毎回消去されます)">
       <button class="fit" id="btnBrowseAvOutDir">参照</button>
     </div>
     <label class="fld">キャラクター一覧ファイル(characters.vpcx、空欄なら自動検出)</label>
@@ -1197,6 +1197,7 @@ function runBridge(args){
 const AV_PREFIX = 'av:';                                   // voiceId 'av:<キャラ名>'
 const AV_NAMING_RULE = '{Number=3}_{Character}_{Text=10}';  // A.I.VOICE2側に設定する命名規則(先頭の連番で行を対応付ける)
 const AV_EXPORT_SUBDIR = '_aivoice2_export';                // avOutDir未設定時の作業フォルダ名(outDir配下)
+const AV_WORKDIR_MARKER = '.voicedesk_workdir';             // VoiceDeskが作業フォルダとして使い始めた印(空フォルダにだけ作る)
 
 function isAvVoice(voiceId){
   const id = String(voiceId || '');
@@ -1288,6 +1289,56 @@ function avParseExportNumber(fileName){
   const m = String(fileName).match(/^(\d+)_.*\.wav$/i);
   return m ? parseInt(m[1], 10) : null;
 }
+// 作業フォルダ内のエントリ名一覧から、書き出し前に消してよいファイルを決める(純粋関数)。
+// 目印ファイル(AV_WORKDIR_MARKER)がある = VoiceDeskが空の状態から使い始めたフォルダ。その中でも
+// 消すのは一括書き出しの命名規則に合う連番wav(avParseExportNumber)と、それに付随する連番txtだけ。
+// 目印が無いフォルダは、空でない限り連番wavであっても消さない(旧バージョンでは同じ設定が
+// A.I.VOICE2の本番の書き出し先で、利用者の音声が連番名で置かれている可能性があるため)。
+// 戻り値: {ok, needMarker, remove: [消すファイル名], foreign: [VoiceDeskのものと判断できない名前]}
+function avWorkDirPlan(names){
+  const list = (names || []).map(String);
+  const hasMarker = list.indexOf(AV_WORKDIR_MARKER) >= 0;
+  const others = list.filter(n=>n !== AV_WORKDIR_MARKER);
+  if(!hasMarker){
+    return others.length === 0
+      ? {ok:true, needMarker:true, remove:[], foreign:[]}
+      : {ok:false, needMarker:false, remove:[], foreign:others};
+  }
+  const remove = [], foreign = [];
+  for(const n of others){
+    const isExport = avParseExportNumber(n) !== null || /^\d+_.*\.txt$/i.test(n);
+    (isExport ? remove : foreign).push(n);
+  }
+  return {ok: foreign.length === 0, needMarker:false, remove: remove, foreign: foreign};
+}
+// 作業フォルダを書き出し可能な状態にする(作成・目印作成・前回の書き出し残骸の削除)。
+// VoiceDesk以外のファイルがあれば何も消さずに {ok:false, msg} を返す
+function avPrepareWorkDir(dir){
+  let entries;
+  try{
+    fs.mkdirSync(dir, {recursive:true});
+    // サブフォルダは末尾に区切り文字を付けて渡し、連番パターンに当たらない(=消さない)扱いにする
+    entries = fs.readdirSync(dir, {withFileTypes:true}).map(e=>e.isDirectory() ? e.name + path.sep : e.name);
+  }catch(e){ return {ok:false, msg:'A.I.VOICE2の作業フォルダを用意できません: ' + dir}; }
+  const plan = avWorkDirPlan(entries);
+  if(!plan.ok){
+    const shown = plan.foreign.slice(0, 5).join(', ') + (plan.foreign.length > 5 ? ' ほか' + (plan.foreign.length - 5) + '件' : '');
+    return {ok:false, msg:
+      'A.I.VOICE2の作業フォルダにVoiceDesk以外のファイルがあるため、書き出しを中止しました(ファイルは消していません)。\n' +
+      '作業フォルダ: ' + dir + '\n該当: ' + shown + '\n' +
+      '作業フォルダは保存のたびに中の書き出しファイルが消去されます。設定の「一括書き出しの作業フォルダ」を' +
+      '空欄に戻すか、空の専用フォルダを指定してください。'};
+  }
+  try{
+    if(plan.needMarker){
+      fs.writeFileSync(path.join(dir, AV_WORKDIR_MARKER),
+        'VoiceDesk: A.I.VOICE2 work folder. Numbered exports in this folder are deleted before each export.\r\n', 'utf8');
+    }
+    // 前回の残骸を消す(上書き確認ダイアログの抑止・番号の混同防止)
+    for(const n of plan.remove) fs.unlinkSync(path.join(dir, n));
+  }catch(e){ return {ok:false, msg:'A.I.VOICE2の作業フォルダを整理できません: ' + e.message}; }
+  return {ok:true};
+}
 // 作業フォルダに連番付きwavがn個そろい、サイズが安定するまで待つ。戻り値: {連番: フルパス} / タイムアウト時 null
 function avWaitExports(dir, n, timeoutMs){
   return new Promise((resolve)=>{
@@ -1323,6 +1374,9 @@ function moveFile(src, dst){
 async function avBatchExport(rows, exportDir){
   const avErr = checkAvExePath();
   if(avErr) return {ok:false, msg:avErr};
+  // 作業フォルダの安全確認はA.I.VOICE2の設定を書き換える前に行う(中止時に副作用を残さない)
+  const wd = avPrepareWorkDir(exportDir);
+  if(!wd.ok) return {ok:false, msg:wd.msg};
   const st = avEnsureSettings();
   if(!st.ok) return {ok:false, msg:st.msg};
   const names = avCharacters();
@@ -1333,11 +1387,6 @@ async function avBatchExport(rows, exportDir){
     if(names.indexOf(ch) < 0) return {ok:false, msg:'A.I.VOICE2にキャラクター「' + ch + '」がありません(声リストを再読込してください)'};
     items.push({character: ch, text: (row.text || '').trim()});
   }
-  try{
-    fs.mkdirSync(exportDir, {recursive:true});
-    // VoiceDesk専用の作業フォルダなので前回の残骸を消す(上書き確認ダイアログの抑止・番号の混同防止)
-    for(const f of fs.readdirSync(exportDir)){ try{ fs.unlinkSync(path.join(exportDir, f)); }catch(e){} }
-  }catch(e){ return {ok:false, msg:'A.I.VOICE2の作業フォルダを用意できません: ' + exportDir}; }
   const projPath = path.join(os.tmpdir(), 'voicedesk_' + Date.now() + '.aieprojx');
   fs.writeFileSync(projPath, avProjectJson(items), 'utf8');
   setStatus('A.I.VOICE2で一括書き出し中... (' + items.length + '行)' + (st.changed ? '\n(A.I.VOICE2の書き出し設定を自動調整しました)' : ''), 'run');
