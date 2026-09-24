@@ -1291,7 +1291,8 @@ function avParseExportNumber(fileName){
 }
 // 作業フォルダ内のエントリ名一覧から、書き出し前に消してよいファイルを決める(純粋関数)。
 // 目印ファイル(AV_WORKDIR_MARKER)がある = VoiceDeskが空の状態から使い始めたフォルダ。その中でも
-// 消すのは一括書き出しの命名規則に合う連番wav(avParseExportNumber)と、それに付随する連番txtだけ。
+// 消すのは一括書き出しの命名規則に合う連番wav(avParseExportNumber)と、A.I.VOICE2がそれと一緒に
+// 保存する連番txt(テキスト同時保存)・連番lab(音素情報ファイル同時保存)だけ。
 // 目印が無いフォルダは、空でない限り連番wavであっても消さない(旧バージョンでは同じ設定が
 // A.I.VOICE2の本番の書き出し先で、利用者の音声が連番名で置かれている可能性があるため)。
 // 戻り値: {ok, needMarker, remove: [消すファイル名], foreign: [VoiceDeskのものと判断できない名前]}
@@ -1306,7 +1307,7 @@ function avWorkDirPlan(names){
   }
   const remove = [], foreign = [];
   for(const n of others){
-    const isExport = avParseExportNumber(n) !== null || /^\d+_.*\.txt$/i.test(n);
+    const isExport = avParseExportNumber(n) !== null || /^\d+_.*\.(txt|lab)$/i.test(n);
     (isExport ? remove : foreign).push(n);
   }
   return {ok: foreign.length === 0, needMarker:false, remove: remove, foreign: foreign};

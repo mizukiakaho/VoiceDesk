@@ -168,6 +168,10 @@ test('avWorkDirPlan: 目印付きなら連番wavと連番txtだけを消し、�
   assert.equal(p.needMarker, false);
   assert.equal(JSON.stringify(p.remove), JSON.stringify(['001_結月ゆかり(通常_こんにちは.wav', '001_結月ゆかり(通常_こんにちは.txt', '002_x.WAV', '003_y.txt']));
   assert.equal(p.foreign.length, 0);
+  // A.I.VOICE2 の「音素情報ファイルを音声ファイルと一緒に保存する」ONで作られる連番labも消す対象
+  const lab = api.avWorkDirPlan([MARK, '004_z.wav', '004_z.lab']);
+  assert.equal(lab.ok, true);
+  assert.equal(JSON.stringify(lab.remove), JSON.stringify(['004_z.wav', '004_z.lab']));
   const only = api.avWorkDirPlan([MARK]);
   assert.equal(only.ok, true);
   assert.equal(only.remove.length, 0);
