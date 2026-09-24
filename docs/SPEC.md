@@ -1,6 +1,8 @@
 # VoiceDesk 仕様書(開発者向け)
 
-バージョン: 1.2.1 / ライセンス: MIT
+本書は「システムの中身」(アーキテクチャ・設定スキーマ・voiceId形式・外部連携・保存/配置/字幕の挙動)の
+一次情報源。リポジトリ構成・コマンド・編集時の制約・運用ルール・確認チェックリストは `CLAUDE.md` を参照し、
+本書には書き写さない。バージョン番号は `CSXS/manifest.xml`、変更履歴は `CHANGELOG.md` を参照。
 
 ## 1. 概要
 
@@ -9,16 +11,7 @@ Adobe Premiere Pro 用 CEP エクステンション。パネル(HTML/JS)から�
 
 ## 2. ファイル構成
 
-```
-voicedesk/
-├─ CSXS/manifest.xml      … CEPマニフェスト(ID: com.nakashima.voicedesk)
-├─ index.html             … パネル本体(UI+全ロジック、単一ファイル)
-├─ jsx/host.jsx           … ExtendScript(Premiere操作)※ASCII文字のみ
-├─ bridge/aivoice2_bridge.ps1 … A.I.VOICE2 UIAutomationブリッジ ※UTF-8 BOM付き
-├─ install.bat            … インストーラ(拡張コピー+PlayerDebugMode設定)
-├─ docs/SPEC.md           … 本書
-└─ docs/AI_PROMPT.md      … AI改修用プロンプト
-```
+`CLAUDE.md` の「リポジトリ構成」を参照。
 
 ## 3. アーキテクチャ
 
@@ -26,19 +19,18 @@ voicedesk/
 [index.html (CEF/Chromium + Node.js)]
    ├─ AquesTalk:  child_process.execFile(AquesTalkPlayer.exe /T /P /W)
    ├─ VOICEVOX系: Node http → GET /speakers, POST /audio_query, POST /synthesis
-   ├─ A.I.VOICE2: child_process → powershell.exe → bridge.ps1(UIAutomation)
+   ├─ A.I.VOICE2: .aieprojx を生成 → powershell.exe(PS_EXE) → bridge.ps1(UIAutomation)で一括書き出し
+   │              (characters.vpcx / app_settings.json は Node の fs で直接読み書き)
    └─ Premiere:   window.__adobe_cep__.evalScript → jsx/host.jsx ($._AQV_.*)
 ```
 
 - Node統合はmanifestの `--enable-nodejs --mixed-context` で有効化
-- PowerShellはPATHに無い環境があるため必ずフルパス
-  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` で呼ぶ(定数 PS_EXE)
 
 ## 4. データ構造
 
 設定は「共通ファイル(`%APPDATA%\VoiceDesk\settings.json`)」と「パネルのlocalStorage
 (`voicedesk_rows_v1`)」の2箇所に分かれている(旧バージョンではlocalStorageのキー
-`voicedesk_settings_v2`に全て格納していたが、v1.3.0で分割した)。
+`voicedesk_settings_v2`に全て格納していた。v1.2.x の次のバージョンで分割)。
 
 ### 4-1. 共通設定ファイル(`%APPDATA%\VoiceDesk\settings.json`)
 
@@ -257,31 +249,11 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
 
 ## 6. 重要な実装上の注意(ハマりどころ)
 
-1. **jsx/host.jsx は必ずASCIIのみ**。日本語コメントを入れると日本語Windowsの
-   ExtendScriptがShift-JISとして誤読し構文エラーで全機能停止する
-2. **bridge/*.ps1 はUTF-8 BOM付き+CRLF**。BOM無しだとPowerShell 5.1が
-   日本語文字列を壊す
-3. **powershell.exe はフルパスで呼ぶ**(PS_EXE定数)。PATHに無い環境がある
-4. ExtendScriptエンジンはPremiere内で共有の可能性があるため、
-   グローバルは `$._AQV_` 名前空間のみ使用($._PPP_ 等を上書きしない)
-5. SRTはUTF-8 BOM付きで書く(Premiereの文字化け防止)
-6. txtのShift-JIS書き込みはNodeでは不可のためPowerShell経由
-   (テキストは環境変数渡しで文字化け回避)
-7. キャプションは createCaptionTrack 1回=1トラック。まとめて1つのSRTにしてから
-   1回で挿入する設計にしている(都度挿入はトラックが乱立するため廃止済み)。
-   ただし字幕一括生成は常にターゲットトラック(音声トラック)単位で分割しており、
-   これは音声トラック数分(通常数本)のSRT・挿入呼び出しに留まるため乱立しない。
-   クリップ単位(数十〜数百件)での都度挿入は引き続き禁止
+編集時に守る制約(ASCII限定のExtendScript、BOM付きPowerShell、`PS_EXE`、`$._AQV_` 名前空間、
+SRTのBOM、Shift-JIS書き込み、キャプション挿入の単位など)は `CLAUDE.md` の「重要な制約」を参照。
+各連携固有のハマりどころは5章の該当節に書く。
 
 ## 7. ビルド・テスト
 
-- ビルド不要(スクリプトのみ)。zipに固めて配布
-- 動作確認: install.bat → Premiere再起動 → パネル表示
-- JS構文チェック: `node --check`(scriptタグ内を抽出して実行)
-- デバッグ: `%APPDATA%\Adobe\CEP\extensions\voicedesk` を直接編集し
-  パネルを閉じて開き直すと反映される。CEFデバッグは .debug ファイルで可能
-- 自動テスト: リポジトリ直下で `node --test`(または `npm test`)を実行すると、
-  `test/helpers/loadIndex.js` が index.html を無変更のまま node:vm で読み込み、
-  ファイル名/パス計算・SRT生成・エラーメッセージ変換などの副作用の少ない純粋ロジックを
-  単体テストする。Premiere操作・A.I.VOICE2連携(UIAutomation)・実際の音声合成エンジンとの
-  通信は実環境前提のためテスト対象外
+ビルド工程は無く、リポジトリ一式をzipにして配布する。
+インストール・デバッグ・構文チェック・自動テストの手順は `CLAUDE.md` の「コマンド」を参照。
