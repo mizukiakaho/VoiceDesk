@@ -28,6 +28,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
+# 標準出力はパネル(Node)がUTF-8として読む。PowerShell 5.1の既定(日本語環境ではcp932)のままだと
+# 日本語のエラーメッセージが文字化けするため、BOM無しUTF-8に固定する
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 Add-Type @"
 using System;

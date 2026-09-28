@@ -1185,7 +1185,7 @@ function runBridge(args){
       ['-NoProfile','-ExecutionPolicy','Bypass','-File', bridgePath()].concat(args).concat(extra),
       {windowsHide:true},
       (err, stdout)=>{
-        const out = String(stdout||'').trim();
+        const out = String(stdout||'').replace(/^﻿/, '').trim();
         if(err || out.indexOf('ERR:') === 0){
           resolve({ok:false, msg: out.replace(/^ERR:\s*/,'') || 'ブリッジの実行に失敗しました'});
         } else {
