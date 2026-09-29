@@ -101,7 +101,7 @@
     <div class="subhead" style="border-top:none; padding-top:0;">共通</div>
     <label class="fld">WAV出力フォルダ</label>
     <div class="row">
-      <input type="text" id="outDir" placeholder="例: C:\\...\\voice">
+      <input type="text" id="outDir" placeholder="例: C:\...\voice">
       <button class="fit" id="btnBrowseOutDir">参照</button>
     </div>
     <label class="fld">txtファイルの文字コード</label>
@@ -123,7 +123,7 @@
     <div class="subhead">AquesTalk</div>
     <label class="fld">AquesTalkPlayer.exe のパス</label>
     <div class="row">
-      <input type="text" id="exePath" placeholder="例: C:\\...\\aquestalkplayer\\AquesTalkPlayer.exe">
+      <input type="text" id="exePath" placeholder="例: C:\...\aquestalkplayer\AquesTalkPlayer.exe">
       <button class="fit" id="btnBrowseExe">参照</button>
     </div>
 
@@ -138,7 +138,7 @@
     <div class="subhead">A.I.VOICE2</div>
     <label class="fld">aivoice.exe のパス</label>
     <div class="row">
-      <input type="text" id="avExePath" placeholder="例: C:\\...\\aivoice.exe">
+      <input type="text" id="avExePath" placeholder="例: C:\...\aivoice.exe">
       <button class="fit" id="btnBrowseAvExe">参照</button>
     </div>
     <label class="fld">一括書き出しの作業フォルダ(空欄ならWAV出力フォルダ内の _aivoice2_export)</label>
@@ -148,12 +148,12 @@
     </div>
     <label class="fld">キャラクター一覧ファイル(characters.vpcx、空欄なら自動検出)</label>
     <div class="row">
-      <input type="text" id="avCharsPath" placeholder="例: C:\\Users\\...\\Documents\\AI\\A.I.VOICE Editor\\2.0\\characters.vpcx">
+      <input type="text" id="avCharsPath" placeholder="例: C:\Users\...\Documents\AI\A.I.VOICE Editor\2.0\characters.vpcx">
       <button class="fit" id="btnBrowseAvChars">参照</button>
     </div>
     <label class="fld">アプリケーション設定ファイル(app_settings.json、空欄なら自動検出)</label>
     <div class="row">
-      <input type="text" id="avSettingsPath" placeholder="例: C:\\Users\\...\\AppData\\Local\\AI\\A.I.VOICE Editor\\2.0\\app_settings.json">
+      <input type="text" id="avSettingsPath" placeholder="例: C:\Users\...\AppData\Local\AI\A.I.VOICE Editor\2.0\app_settings.json">
       <button class="fit" id="btnBrowseAvSettings">参照</button>
     </div>
     <div class="hint">保存時はVoiceDeskがプロジェクト(.aieprojx)を生成してA.I.VOICE2で開き「一括書き出し」を1回だけ実行します。A.I.VOICE2側の「ファイル名の指定方法=命名規則」「一括書き出し=ブロックごと」の設定は、A.I.VOICE2が終了しているときにVoiceDeskが自動で調整します(元の設定は app_settings.json.voicedesk.bak に退避)。</div>
