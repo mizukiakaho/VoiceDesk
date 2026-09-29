@@ -71,6 +71,24 @@ const EPILOGUE = [
   '  wavDurationSec: wavDurationSec,',
   '  writeSrt: writeSrt,',
   '  clearSavedRowsText: clearSavedRowsText,',
+  '  isAvVoice: isAvVoice,',
+  '  avCharName: avCharName,',
+  '  avParseCharacters: avParseCharacters,',
+  '  avSettingsIssues: avSettingsIssues,',
+  '  avPatchSettings: avPatchSettings,',
+  '  avProjectJson: avProjectJson,',
+  '  avParseExportNumber: avParseExportNumber,',
+  '  avWorkDirPlan: avWorkDirPlan,',
+  '  avPrepareWorkDir: avPrepareWorkDir,',
+  '  AV_WORKDIR_MARKER: AV_WORKDIR_MARKER,',
+  '  avExportDir: avExportDir,',
+  '  avDefaultCharsPath: avDefaultCharsPath,',
+  '  avDefaultSettingsPath: avDefaultSettingsPath,',
+  '  avEnsureSettings: avEnsureSettings,',
+  '  avBatchExport: avBatchExport,',
+  '  avWaitExports: avWaitExports,',
+  '  saveOneRow: saveOneRow,',
+  '  runBridge: runBridge,',
   '  pickGlobalSettings: pickGlobalSettings,',
   '  globalSettingsPath: globalSettingsPath,',
   '  globalSettingsDir: globalSettingsDir,',
@@ -153,7 +171,8 @@ process.once('exit', function () {
   });
 });
 
-function loadIndex() {
+function loadIndex(opts) {
+  opts = opts || {};
   const src = extractScriptSource();
   const doc = createDocumentMock();
   const localStorage = createLocalStorageMock();
@@ -165,7 +184,7 @@ function loadIndex() {
     },
     __adobe_cep__: {
       evalScript: function (script, cb) { if (cb) cb(''); },
-      getSystemPath: function () { return 'file:///C:/dummy'; }
+      getSystemPath: function () { return opts.extensionPath || 'file:///C:/dummy'; }
     },
     clipboardData: null
   };

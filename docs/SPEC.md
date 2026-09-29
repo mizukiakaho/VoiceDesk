@@ -1,6 +1,8 @@
 # VoiceDesk 仕様書(開発者向け)
 
-バージョン: 1.2.1 / ライセンス: MIT
+本書は「システムの中身」(アーキテクチャ・設定スキーマ・voiceId形式・外部連携・保存/配置/字幕の挙動)の
+一次情報源。リポジトリ構成・コマンド・編集時の制約・運用ルール・確認チェックリストは `CLAUDE.md` を参照し、
+本書には書き写さない。バージョン番号は `CSXS/manifest.xml`、変更履歴は `CHANGELOG.md` を参照。
 
 ## 1. 概要
 
@@ -9,16 +11,7 @@ Adobe Premiere Pro 用 CEP エクステンション。パネル(HTML/JS)から�
 
 ## 2. ファイル構成
 
-```
-voicedesk/
-├─ CSXS/manifest.xml      … CEPマニフェスト(ID: com.nakashima.voicedesk)
-├─ index.html             … パネル本体(UI+全ロジック、単一ファイル)
-├─ jsx/host.jsx           … ExtendScript(Premiere操作)※ASCII文字のみ
-├─ bridge/aivoice2_bridge.ps1 … A.I.VOICE2 UIAutomationブリッジ ※UTF-8 BOM付き
-├─ install.bat            … インストーラ(拡張コピー+PlayerDebugMode設定)
-├─ docs/SPEC.md           … 本書
-└─ docs/AI_PROMPT.md      … AI改修用プロンプト
-```
+`CLAUDE.md` の「リポジトリ構成」を参照。
 
 ## 3. アーキテクチャ
 
@@ -26,19 +19,18 @@ voicedesk/
 [index.html (CEF/Chromium + Node.js)]
    ├─ AquesTalk:  child_process.execFile(AquesTalkPlayer.exe /T /P /W)
    ├─ VOICEVOX系: Node http → GET /speakers, POST /audio_query, POST /synthesis
-   ├─ A.I.VOICE2: child_process → powershell.exe → bridge.ps1(UIAutomation)
+   ├─ A.I.VOICE2: .aieprojx を生成 → powershell.exe(PS_EXE) → bridge.ps1(UIAutomation)で一括書き出し
+   │              (characters.vpcx / app_settings.json は Node の fs で直接読み書き)
    └─ Premiere:   window.__adobe_cep__.evalScript → jsx/host.jsx ($._AQV_.*)
 ```
 
 - Node統合はmanifestの `--enable-nodejs --mixed-context` で有効化
-- PowerShellはPATHに無い環境があるため必ずフルパス
-  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` で呼ぶ(定数 PS_EXE)
 
 ## 4. データ構造
 
 設定は「共通ファイル(`%APPDATA%\VoiceDesk\settings.json`)」と「パネルのlocalStorage
 (`voicedesk_rows_v1`)」の2箇所に分かれている(旧バージョンではlocalStorageのキー
-`voicedesk_settings_v2`に全て格納していたが、v1.3.0で分割した)。
+`voicedesk_settings_v2`に全て格納していた。v1.2.x の次のバージョンで分割)。
 
 ### 4-1. 共通設定ファイル(`%APPDATA%\VoiceDesk\settings.json`)
 
@@ -50,7 +42,9 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
   "exePath":   "AquesTalkPlayer.exeパス",
   "avExePath": "aivoice.exeパス",
   "outDir":    "WAV出力フォルダ",
-  "avOutDir":  "A.I.VOICE2書き出しフォルダ",
+  "avOutDir":  "A.I.VOICE2一括書き出しの作業フォルダ(空なら outDir/_aivoice2_export)",
+  "avCharsPath":    "characters.vpcx のパス(空なら %USERPROFILE%\\Documents\\AI\\A.I.VOICE Editor\\2.0\\characters.vpcx)",
+  "avSettingsPath": "app_settings.json のパス(空なら %LOCALAPPDATA%\\AI\\A.I.VOICE Editor\\2.0\\app_settings.json)",
   "engines":   [{"name":"VOICEVOX","url":"http://127.0.0.1:50021","exe":"run.exeパス"}],
   "vvAutoLaunch": true,
   "txtEnc": "sjis|utf8",
@@ -121,7 +115,8 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
 ### voiceId 形式
 - `aq:<プリセット名>` … AquesTalk (例 `aq:れいむ`)
 - `vv:<エンジン名>:<styleId>` … VOICEVOX系 (例 `vv:VOICEVOX:3`)
-- `av` … A.I.VOICE2
+- `av:<キャラ名>` … A.I.VOICE2 (例 `av:結月ゆかり(通常`。キャラ名は `characters.vpcx` の `characters[].name` そのもの)
+- `av` … A.I.VOICE2(キャラ未指定、旧形式の互換用。書き出し時は一覧先頭のキャラ、再生時はA.I.VOICE2側で選択中のキャラ)
 
 ## 5. 外部連携仕様
 
@@ -143,12 +138,34 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
   クエリは無改変で通過する
 
 ### A.I.VOICE2 (bridge/aivoice2_bridge.ps1)
-公式APIが無いためUIAutomationで操作。
-- 引数: `-Action play|set|save|saveall|dump -Text "..." [-ExePath aivoice.exe]`
-- テキスト欄: 名前が空のEdit要素をクリック→クリップボード経由で貼り付け
-  (FlutterアプリのためUIAのSetFocus/SetValueは効かない)
-- ボタン: Name="再生"/"書き出し"/"一括書き出し" を検索してInvoke
-- 書き出し完了はパネル側で出力フォルダの新規wav出現を監視(pollNewWav)
+公式APIが無いためUIAutomationで操作。調査の詳細と実測値は `docs/AIVOICE2_RESEARCH.md` を参照。
+- 引数: `-Action play|set|save|saveall|exportproj|status|dump [-Text "..."] [-Character "キャラ名"]
+  [-Project x.aieprojx] [-OutDir dir] [-ExePath aivoice.exe]`
+- **保存は `exportproj`(プロジェクト一括方式)**: パネルが `.aieprojx`(JSON:
+  `{"version":"3.1","textblocks":[{"character","text"}]}`、読み情報は省略可)を `%TEMP%\voicedesk_<ms>.aieprojx` に
+  生成 → ブリッジが未起動なら `aivoice.exe <proj>` で起動(起動中なら「ファイル」→「プロジェクトを開く」→
+  開くダイアログにパス入力) → 「一括書き出し」→ 確認ダイアログの保存先フォルダ欄を `-OutDir` に書き換え →
+  「書き出しを実行」→ 呼び出し前の前面ウィンドウ(Premiere)へ戻す。行数に関係なく前面化は1回。
+  A.I.VOICE2 が `<OutDir>/{Number=3}_{Character}_{Text=10}.wav`(+txt)を書き出すので、パネル側は
+  `avWaitExports()` で連番wavが行数分そろいサイズが安定するのを待ち、連番(1始まり)で行に対応付ける
+- A.I.VOICE2 側の前提設定(`app_settings.json` の `saveWave`): `filePathSelectionMode: "namingRule"`、
+  `namingRule.file` に `{Number}`(または `{Number=N}`)を含むこと、`namingRule.numberStart: 1`、
+  `exportAllAction: "textblock"`。`avEnsureSettings()` が保存前に検査し、不足があれば
+  **A.I.VOICE2 停止中に限り**(起動中は終了を促すエラー)元を `app_settings.json.voicedesk.bak` に退避して
+  必要項目だけ書き換える(`avPatchSettings`、他の設定は保持)。起動中に書き換えても終了時に上書きされるため。
+  `namingRule.directory` は触らない(Windowsパスを書くと設定ファイル全体が壊れた扱いになるため。書くなら
+  `file:///C:/...` 形式)
+- 未保存の変更がある場合: 開いているのが VoiceDesk 生成プロジェクト(`voicedesk_<数字>.aieprojx`)なら
+  ブリッジが「破棄」を押す。ユーザーのプロジェクトなら「キャンセル」して `ERR: DIRTY: ...` で中断する
+- `play`/`set`/`save` の `-Character`: キャラクター一覧の項目(Image要素、Nameがキャラ名で始まる)を
+  クリック→Ctrl+Q で現在のブロックに割り当てる。テキスト欄は名前が空のEdit要素をクリック→
+  クリップボード経由で貼り付け(FlutterアプリのためUIAのSetFocus/SetValueは効かない)
+- ボタン: Name="再生"/"書き出し"/"一括書き出し"/"書き出しを実行" を検索してInvoke(前面化不要)
+- Win32ダイアログ(開く/フォルダー選択、クラス `#32770`)は前面ウィンドウのクラス名+プロセスIDで検出し、
+  表示直後にフォーカスのあるファイル名欄へ SendKeys でパス+Enter を送る
+- **ハマりどころ**: Flutter のUIAツリーは最初の問い合わせ直後は空で、`Get-AivoiceWindow` の
+  「関数内で FindFirst → Start-Sleep 300ms → return」という構造でのみ安定して取得できる
+  (インライン展開すると同じ手順でも空になる)。この関数の構造を変えないこと
 - 出力: 標準出力に `OK: ...` / `ERR: メッセージ`
 
 ### Premiere ExtendScript ($._AQV_ 名前空間 / jsx/host.jsx)
@@ -181,7 +198,7 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
   - `aq:<プリセット名>` → `AQ_<プリセット名>`
   - `vv:<エンジン名>:<styleId>` → `<エンジン名>_<キャラ名>`(styleIdからvvSpeakerCacheを
     引いてスタイル部分を除いたキャラ名を解決。スタイル違いは同一フォルダに統合される)
-  - `av`(A.I.VOICE2) → 固定 `AIVOICE2`
+  - `av:<キャラ名>`(A.I.VOICE2) → `AIVOICE2_<キャラ名>`(例 `AIVOICE2_結月ゆかり(通常`)、旧 `av` → `AIVOICE2`
   - フォルダ名は `safeFileName` で禁則文字除去・空白を`_`に置換
 - ファイル名は `<連番3桁>_[キャラ名_]セリフ.wav`(`nextSeqWavPath()`がフォルダ内の
   既存ファイルから`^(\d+)_`最大値を走査し+1、3桁ゼロ埋めして採番。フォルダ内のみで
@@ -192,7 +209,7 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
     (`namePrefix`ON時、`voiceShortName`の結果に対する`safeFileName`)は引数省略のため
     従来どおり50文字上限のまま。**フォルダ名**(`voiceFolderName`)も引数省略で50文字上限の
     まま変更なし。用途によって`safeFileName`の第2引数`maxLen`(省略時50)で上限が異なる点に注意
-- パス長ガード: 保存フルパス(`wavPath`/A.I.VOICE2の`avDestPath`)が`MAX_PATH_LEN`(240、
+- パス長ガード: 保存フルパス(`wavPath`)が`MAX_PATH_LEN`(240、
   Windowsの`MAX_PATH`260への安全マージン)を超える場合、`pathTooLong()`が`saveOneRow`内で
   合成・書き出し呼び出しの直前に検知し、`pathLenMsg()`のメッセージで保存処理そのものを
   中断する(合成は実行されない)。加えて、事前チェックをすり抜けたOS側の`ENAMETOOLONG`
@@ -204,17 +221,31 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
   `captions_<timestamp>_track<N>.srt`(`<timestamp>`は全トラック共通の生成時刻)を
   `outDir`(未設定時は先頭クリップのフォルダ)に書き出して`insertCaption`をトラック数分
   呼び出す。UI上のオプション(チェックボックス等)は無く、常にトラック毎に分割する
-- A.I.VOICE2は`voiceId`が常に`av`のみで話者を判別できないため専用フォルダ
-  `avOutDir/AIVOICE2/`に統一。`pollNewWav`によるWAV検知は従来通り`avOutDir`直下のみを
-  監視(サブフォルダは監視対象外)し、検知後に`fs.renameSync`で
-  `avOutDir/AIVOICE2/<連番>_....wav`へ移動する。移動失敗時は元のパスのまま処理を続行する
+- A.I.VOICE2の行は`avBatchExport(rows, exportDir)`でまとめて書き出す(全行保存では`btnSaveAll`が
+  A.I.VOICE2の行だけ先に1回のバッチで書き出し、結果の`Map(row -> 作業フォルダ内wav)`を`ctx.avResults`として
+  `saveOneRow`へ渡す。個別保存は1行だけのバッチ)。作業フォルダは`avExportDir(outDir)`
+  (`avOutDir`設定、空なら`outDir/_aivoice2_export`)。書き出し前に`avPrepareWorkDir(dir)`が
+  前回の書き出し残骸を消す(A.I.VOICE2の上書き確認ダイアログの抑止・連番の混同防止)。何を消してよいかは
+  純粋関数`avWorkDirPlan(names)`(戻り値`{ok, needMarker, remove, foreign}`)が決める:
+  - 目印ファイル`.voicedesk_workdir`(`AV_WORKDIR_MARKER`)が無いフォルダは、空(または未作成)のときだけ
+    使う。作成・空なら目印を置いて以後VoiceDeskの作業フォルダとみなす。空でなければ**連番wavしか無くても
+    何も消さず中止**する(旧バージョンでは`avOutDir`が「A.I.VOICE2の書き出し先フォルダ」で、設定移行で
+    その値が引き継がれる。そこには利用者の本番音声が連番名で置かれている可能性があるため)
+  - 目印のあるフォルダでも、消すのは命名規則の書き出し名(`avParseExportNumber`が数値を返す`^\d+_.*\.wav$`)と
+    A.I.VOICE2が一緒に保存する連番txt・連番lab(`^\d+_.*\.(txt|lab)$`、テキスト同時保存・音素情報ファイル
+    同時保存がONの場合)だけ。それ以外のファイル・サブフォルダが1つでもあれば何も消さず中止する
+  - 中止時は該当ファイル名(先頭5件)と「作業フォルダを空欄に戻すか空の専用フォルダを指定」する案内を
+    ステータスに出す。この確認は`avEnsureSettings()`より前に行い、中止時にA.I.VOICE2の設定を書き換えない
+  `saveOneRow`は作業フォルダの
+  wavを`outDir/AIVOICE2_<キャラ名>/<連番>_<セリフ>.wav`へ`moveFile`(rename、失敗時はcopy+unlink)で移し、
+  A.I.VOICE2が同時保存したtxtは捨てて`makeTxt`/`txtEnc`設定に従いVoiceDeskがtxtを作る
 - `insAudio`ON時は`placeAudio`→`placeVoice`の第4引数(binName)に`voiceFolderName(voiceId)`を
   渡し、PremiereのVoiceDeskビン配下に同名のサブビンが作られてそこにインポートされる
-- 1行分の保存処理は`saveOneRow(row, ctx)`(`ctx = {dir, avDir, insAudio, offset}`、戻り値
+- 1行分の保存処理は`saveOneRow(row, ctx)`(`ctx = {dir, avDir, insAudio, offset, avResults?}`、戻り値
   `{ok, wavPath, msg, advance, startSec, endSec}`)に集約されており、全行保存(`btnSaveAll`)と
   行ごとの個別保存(`saveRow`、💾ボタン)の両方から呼ばれる。連番・フォルダ構成・txt生成・
-  A.I.VOICE2のrename処理はこの関数に一元化されている。`saveOneRow`自体はプレイヘッドを
-  動かさない(全行保存の`offset`計算が二重加算になるため)
+  A.I.VOICE2の作業フォルダからの移動処理はこの関数に一元化されている。`saveOneRow`自体は
+  プレイヘッドを動かさない(全行保存の`offset`計算が二重加算になるため)
 - `insAudio`ON時、保存後にPremiereの再生ヘッドを配置したクリップの終端(+`insGap`)へ
   自動で進める(`movePlayhead()`、`$._AQV_.setPlayheadSec`を呼ぶ)。個別保存(`saveRow`)は
   その行の`res.endSec`を使って毎回移動する。全行保存(`btnSaveAll`)はループ中は移動せず
@@ -229,31 +260,11 @@ WAV出力先・各エンジンのパス・トラック割当・お気に入り�
 
 ## 6. 重要な実装上の注意(ハマりどころ)
 
-1. **jsx/host.jsx は必ずASCIIのみ**。日本語コメントを入れると日本語Windowsの
-   ExtendScriptがShift-JISとして誤読し構文エラーで全機能停止する
-2. **bridge/*.ps1 はUTF-8 BOM付き+CRLF**。BOM無しだとPowerShell 5.1が
-   日本語文字列を壊す
-3. **powershell.exe はフルパスで呼ぶ**(PS_EXE定数)。PATHに無い環境がある
-4. ExtendScriptエンジンはPremiere内で共有の可能性があるため、
-   グローバルは `$._AQV_` 名前空間のみ使用($._PPP_ 等を上書きしない)
-5. SRTはUTF-8 BOM付きで書く(Premiereの文字化け防止)
-6. txtのShift-JIS書き込みはNodeでは不可のためPowerShell経由
-   (テキストは環境変数渡しで文字化け回避)
-7. キャプションは createCaptionTrack 1回=1トラック。まとめて1つのSRTにしてから
-   1回で挿入する設計にしている(都度挿入はトラックが乱立するため廃止済み)。
-   ただし字幕一括生成は常にターゲットトラック(音声トラック)単位で分割しており、
-   これは音声トラック数分(通常数本)のSRT・挿入呼び出しに留まるため乱立しない。
-   クリップ単位(数十〜数百件)での都度挿入は引き続き禁止
+編集時に守る制約(ASCII限定のExtendScript、BOM付きPowerShell、`PS_EXE`、`$._AQV_` 名前空間、
+SRTのBOM、Shift-JIS書き込み、キャプション挿入の単位など)は `CLAUDE.md` の「重要な制約」を参照。
+各連携固有のハマりどころは5章の該当節に書く。
 
 ## 7. ビルド・テスト
 
-- ビルド不要(スクリプトのみ)。zipに固めて配布
-- 動作確認: install.bat → Premiere再起動 → パネル表示
-- JS構文チェック: `node --check`(scriptタグ内を抽出して実行)
-- デバッグ: `%APPDATA%\Adobe\CEP\extensions\voicedesk` を直接編集し
-  パネルを閉じて開き直すと反映される。CEFデバッグは .debug ファイルで可能
-- 自動テスト: リポジトリ直下で `node --test`(または `npm test`)を実行すると、
-  `test/helpers/loadIndex.js` が index.html を無変更のまま node:vm で読み込み、
-  ファイル名/パス計算・SRT生成・エラーメッセージ変換などの副作用の少ない純粋ロジックを
-  単体テストする。Premiere操作・A.I.VOICE2連携(UIAutomation)・実際の音声合成エンジンとの
-  通信は実環境前提のためテスト対象外
+ビルド工程は無く、リポジトリ一式をzipにして配布する。
+インストール・デバッグ・構文チェック・自動テストの手順は `CLAUDE.md` の「コマンド」を参照。
